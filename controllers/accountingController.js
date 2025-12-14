@@ -14,25 +14,46 @@ exports.getAllAccounting = async (req, res) => {
       query.expenseType = expenseType;
     }
     
-    const entries = await Accounting.find(query).sort({ date: -1 });
+    // Use lean() for better performance
+    const entries = await Accounting.find(query).lean().sort({ date: -1 });
     
     if (req.query.includeStats === 'true') {
-      const allEntries = await Accounting.find().sort({ date: 1 });
+      // Use parallel queries for better performance
+      const [allEntries, statsResult] = await Promise.all([
+        Accounting.find().lean().sort({ date: 1 }),
+        // Use aggregation for faster stats calculation
+        Accounting.aggregate([
+          {
+            $group: {
+              _id: '$category',
+              total: {
+                $sum: {
+                  $cond: [
+                    { $eq: ['$category', 'Income'] },
+                    { $ifNull: ['$credit', 0] },
+                    { $ifNull: ['$debit', 0] }
+                  ]
+                }
+              }
+            }
+          }
+        ])
+      ]);
       
-      // Recalculate balance for all entries
+      // Calculate balance using aggregation for better performance
       let balance = 0;
       const entriesWithBalance = allEntries.map(e => {
         balance = balance + (e.credit || 0) - (e.debit || 0);
-        return { ...e.toObject(), balance };
+        return { ...e, balance };
       });
       
+      // Extract stats from aggregation result
+      const incomeStat = statsResult.find(s => s._id === 'Income');
+      const expenseStat = statsResult.find(s => s._id === 'Expense');
+      
       const stats = {
-        totalIncome: allEntries
-          .filter(e => e.category === 'Income')
-          .reduce((sum, e) => sum + e.credit, 0),
-        totalExpenses: allEntries
-          .filter(e => e.category === 'Expense')
-          .reduce((sum, e) => sum + e.debit, 0),
+        totalIncome: incomeStat?.total || 0,
+        totalExpenses: expenseStat?.total || 0,
         netBalance: entriesWithBalance.length > 0 ? entriesWithBalance[entriesWithBalance.length - 1].balance : 0,
       };
       
@@ -40,8 +61,8 @@ exports.getAllAccounting = async (req, res) => {
       const formattedEntries = entries.map(e => {
         const entryIndex = allEntries.findIndex(ae => ae._id.toString() === e._id.toString());
         return {
-          ...e.toObject(),
-          balance: entryIndex >= 0 ? entriesWithBalance[entryIndex].balance : e.balance,
+          ...e,
+          balance: entryIndex >= 0 ? entriesWithBalance[entryIndex].balance : (e.balance || 0),
           id: e._id.toString()
         };
       });
@@ -54,7 +75,7 @@ exports.getAllAccounting = async (req, res) => {
     
     // Format entries for frontend
     const formattedEntries = entries.map(e => ({
-      ...e.toObject(),
+      ...e,
       id: e._id.toString()
     }));
     
@@ -165,16 +186,34 @@ exports.deleteAccountingEntry = async (req, res) => {
 // Get accounting statistics
 exports.getAccountingStats = async (req, res) => {
   try {
-    const entries = await Accounting.find();
+    // Use aggregation for faster stats calculation
+    const [statsResult, lastEntry] = await Promise.all([
+      Accounting.aggregate([
+        {
+          $group: {
+            _id: '$category',
+            total: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$category', 'Income'] },
+                  { $ifNull: ['$credit', 0] },
+                  { $ifNull: ['$debit', 0] }
+                ]
+              }
+            }
+          }
+        }
+      ]),
+      Accounting.findOne().lean().sort({ date: -1 })
+    ]);
+    
+    const incomeStat = statsResult.find(s => s._id === 'Income');
+    const expenseStat = statsResult.find(s => s._id === 'Expense');
     
     const stats = {
-      totalIncome: entries
-        .filter(e => e.category === 'Income')
-        .reduce((sum, e) => sum + e.credit, 0),
-      totalExpenses: entries
-        .filter(e => e.category === 'Expense')
-        .reduce((sum, e) => sum + e.debit, 0),
-      netBalance: entries.length > 0 ? entries[entries.length - 1].balance : 0,
+      totalIncome: incomeStat?.total || 0,
+      totalExpenses: expenseStat?.total || 0,
+      netBalance: lastEntry?.balance || 0,
     };
     
     res.json(stats);

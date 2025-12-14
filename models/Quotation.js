@@ -65,6 +65,12 @@ const quotationSchema = new mongoose.Schema({
   timestamps: true 
 });
 
+// Indexes for better query performance
+quotationSchema.index({ createdAt: -1 });
+quotationSchema.index({ date: -1 });
+quotationSchema.index({ status: 1 });
+quotationSchema.index({ customer: 1 });
+
 // Pre-save middleware to calculate totalAmount
 quotationSchema.pre('save', function(next) {
   if (this.products && this.products.length > 0) {

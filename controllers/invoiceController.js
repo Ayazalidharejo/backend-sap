@@ -4,28 +4,55 @@ const generateSequentialId = require('../utils/generateSequentialId');
 // Get all invoices
 exports.getAllInvoices = async (req, res) => {
   try {
-    const invoices = await Invoice.find().sort({ createdAt: -1 });
+    // Use lean() for better performance
+    const invoices = await Invoice.find().lean().sort({ createdAt: -1 });
     
     // Format invoices with id field
     const formattedInvoices = invoices.map(inv => ({
-      ...inv.toObject(),
+      ...inv,
       id: inv._id.toString(),
-      products: inv.products.map(prod => ({
-        ...prod.toObject(),
-        id: prod._id ? prod._id.toString() : prod.id
+      products: (inv.products || []).map(prod => ({
+        ...prod,
+        id: prod._id ? prod._id.toString() : (prod.id || Date.now().toString())
       }))
     }));
     
     if (req.query.includeStats === 'true') {
-      const stats = {
-        totalInvoices: invoices.length,
-        totalAmount: invoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0),
-        paidAmount: invoices
-          .filter(inv => inv.status === 'Paid')
-          .reduce((sum, inv) => sum + (inv.totalAmount || 0), 0),
-        pendingAmount: invoices
-          .filter(inv => inv.status === 'Pending')
-          .reduce((sum, inv) => sum + (inv.totalAmount || 0), 0),
+      // Use MongoDB aggregation for faster stats calculation
+      const statsPipeline = [
+        {
+          $group: {
+            _id: null,
+            totalInvoices: { $sum: 1 },
+            totalAmount: { $sum: { $ifNull: ['$totalAmount', 0] } },
+            paidAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$status', 'Paid'] },
+                  { $ifNull: ['$totalAmount', 0] },
+                  0
+                ]
+              }
+            },
+            pendingAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$status', 'Pending'] },
+                  { $ifNull: ['$totalAmount', 0] },
+                  0
+                ]
+              }
+            }
+          }
+        }
+      ];
+      
+      const statsResult = await Invoice.aggregate(statsPipeline);
+      const stats = statsResult[0] || {
+        totalInvoices: 0,
+        totalAmount: 0,
+        paidAmount: 0,
+        pendingAmount: 0
       };
       
       return res.json({
@@ -138,17 +165,41 @@ exports.deleteInvoice = async (req, res) => {
 // Get invoice statistics
 exports.getInvoiceStats = async (req, res) => {
   try {
-    const invoices = await Invoice.find();
+    // Use MongoDB aggregation for faster stats calculation
+    const statsPipeline = [
+      {
+        $group: {
+          _id: null,
+          totalInvoices: { $sum: 1 },
+          totalAmount: { $sum: { $ifNull: ['$totalAmount', 0] } },
+          paidAmount: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'Paid'] },
+                { $ifNull: ['$totalAmount', 0] },
+                0
+              ]
+            }
+          },
+          pendingAmount: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'Pending'] },
+                { $ifNull: ['$totalAmount', 0] },
+                0
+              ]
+            }
+          }
+        }
+      }
+    ];
     
-    const stats = {
-      totalInvoices: invoices.length,
-      totalAmount: invoices.reduce((sum, inv) => sum + inv.totalAmount, 0),
-      paidAmount: invoices
-        .filter(inv => inv.status === 'Paid')
-        .reduce((sum, inv) => sum + inv.totalAmount, 0),
-      pendingAmount: invoices
-        .filter(inv => inv.status === 'Pending')
-        .reduce((sum, inv) => sum + inv.totalAmount, 0),
+    const statsResult = await Invoice.aggregate(statsPipeline);
+    const stats = statsResult[0] || {
+      totalInvoices: 0,
+      totalAmount: 0,
+      paidAmount: 0,
+      pendingAmount: 0
     };
     
     res.json(stats);

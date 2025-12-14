@@ -7,31 +7,78 @@ exports.getAllInventory = async (req, res) => {
     const { category } = req.query;
     const query = category ? { category } : {};
     
-    const items = await Inventory.find(query).sort({ createdAt: -1 });
+    // Use lean() for better performance - returns plain JavaScript objects
+    const items = await Inventory.find(query).lean().sort({ createdAt: -1 });
     
     // Format items with id field - preserve original category, add itemType field
     const formattedItems = items.map(item => {
-      const itemObj = item.toObject()
-      const originalCategory = itemObj.category // Preserve: 'machines', 'probs', 'parts', 'productsCategory', 'importStock'
+      const originalCategory = item.category // Preserve: 'machines', 'probs', 'parts', 'productsCategory', 'importStock'
       
       return {
-        ...itemObj,
+        ...item,
         id: item._id.toString(),
         itemType: originalCategory, // Keep original category as itemType
         // For machines: category becomes machineCategory value (instock/repair/sold) for display
         // For importStock: category becomes categoryName for display
-        category: originalCategory === 'machines' ? (itemObj.machineCategory || 'instock') : 
-                  (originalCategory === 'importStock' && itemObj.categoryName ? itemObj.categoryName : originalCategory)
+        category: originalCategory === 'machines' ? (item.machineCategory || 'instock') : 
+                  (originalCategory === 'importStock' && item.categoryName ? item.categoryName : originalCategory)
       }
     });
     
     if (req.query.includeStats === 'true') {
-      const stats = {
-        totalStockValue: items.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 0)), 0),
-        itemsInStockMachines: items.filter(i => i.category === 'machines' && (i.machineCategory === 'instock' || i.category === 'instock')).length,
-        itemsSold: items.filter(i => (i.machineCategory === 'sold' || i.status === 'Sold')).length,
-        stockInProbes: items.filter(i => i.category === 'probs').length,
-        stockInParts: items.filter(i => i.category === 'parts').length,
+      // Use MongoDB aggregation for faster stats calculation
+      const statsPipeline = [
+        {
+          $group: {
+            _id: null,
+            totalStockValue: {
+              $sum: { $multiply: [{ $ifNull: ['$price', 0] }, { $ifNull: ['$quantity', 0] }] }
+            },
+            itemsInStockMachines: {
+              $sum: {
+                $cond: [
+                  { $and: [
+                    { $eq: ['$category', 'machines'] },
+                    { $eq: ['$machineCategory', 'instock'] }
+                  ]},
+                  1,
+                  0
+                ]
+              }
+            },
+            itemsSold: {
+              $sum: {
+                $cond: [
+                  { $or: [
+                    { $eq: ['$machineCategory', 'sold'] },
+                    { $eq: ['$status', 'Sold'] }
+                  ]},
+                  1,
+                  0
+                ]
+              }
+            },
+            stockInProbes: {
+              $sum: {
+                $cond: [{ $eq: ['$category', 'probs'] }, 1, 0]
+              }
+            },
+            stockInParts: {
+              $sum: {
+                $cond: [{ $eq: ['$category', 'parts'] }, 1, 0]
+              }
+            }
+          }
+        }
+      ];
+      
+      const statsResult = await Inventory.aggregate(statsPipeline);
+      const stats = statsResult[0] || {
+        totalStockValue: 0,
+        itemsInStockMachines: 0,
+        itemsSold: 0,
+        stockInProbes: 0,
+        stockInParts: 0
       };
       
       return res.json({
@@ -79,30 +126,40 @@ exports.createInventoryItem = async (req, res) => {
   try {
     const { category } = req.body;
     
-    // Generate IDs based on category
+    // Generate IDs based on category (only if not provided)
     let pN, serialNo, boxNo, modelNo, sN;
     
-    // Get max S/N
-    const maxSN = await Inventory.findOne({ category }).sort({ sN: -1 });
-    sN = maxSN ? (maxSN.sN || 0) + 1 : 1;
+    // Get max S/N (only if not provided)
+    if (!req.body.sN) {
+      const maxSN = await Inventory.findOne({ category }).sort({ sN: -1 });
+      sN = maxSN ? (maxSN.sN || 0) + 1 : 1;
+    } else {
+      sN = req.body.sN;
+    }
     
-    // Generate other IDs based on category
-    if (category === 'machines' || category === 'productsCategory') {
-      pN = await generateSequentialId('PN', Inventory, 'pN');
-      serialNo = await generateSequentialId('MCH', Inventory, 'serialNo');
-      modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
+    // Generate other IDs based on category (only if not provided)
+    if (category === 'machines') {
+      // For machines: all fields should be provided manually, auto-generate only if not provided
+      if (!req.body.modelNo) {
+        modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
+      }
+    } else if (category === 'productsCategory') {
+      if (!req.body.pN) pN = await generateSequentialId('PN', Inventory, 'pN');
+      if (!req.body.serialNo) serialNo = await generateSequentialId('MCH', Inventory, 'serialNo');
+      if (!req.body.modelNo) modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
     } else if (category === 'probs') {
-      boxNo = await generateSequentialId('BX', Inventory, 'boxNo');
-      modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
+      if (!req.body.boxNo) boxNo = await generateSequentialId('BX', Inventory, 'boxNo');
+      if (!req.body.modelNo) modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
     } else if (category === 'parts') {
-      modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
+      if (!req.body.modelNo) modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
     } else if (category === 'importStock') {
-      serialNo = await generateSequentialId('IMP', Inventory, 'serialNo');
+      if (!req.body.serialNo) serialNo = await generateSequentialId('IMP', Inventory, 'serialNo');
     }
     
     const item = new Inventory({
       ...req.body,
-      sN,
+      sN: req.body.sN || sN,
+      // Use provided values, fallback to auto-generated only if not provided
       pN: req.body.pN || pN,
       serialNo: req.body.serialNo || serialNo,
       boxNo: req.body.boxNo || boxNo,
@@ -176,14 +233,59 @@ exports.deleteInventoryItem = async (req, res) => {
 // Get inventory statistics
 exports.getInventoryStats = async (req, res) => {
   try {
-    const items = await Inventory.find();
+    // Use MongoDB aggregation for faster stats calculation
+    const statsPipeline = [
+      {
+        $group: {
+          _id: null,
+          totalStockValue: {
+            $sum: { $multiply: [{ $ifNull: ['$price', 0] }, { $ifNull: ['$quantity', 0] }] }
+          },
+          itemsInStockMachines: {
+            $sum: {
+              $cond: [
+                { $and: [
+                  { $eq: ['$category', 'machines'] },
+                  { $eq: ['$machineCategory', 'instock'] }
+                ]},
+                1,
+                0
+              ]
+            }
+          },
+          itemsSold: {
+            $sum: {
+              $cond: [
+                { $or: [
+                  { $eq: ['$machineCategory', 'sold'] },
+                  { $eq: ['$status', 'Sold'] }
+                ]},
+                1,
+                0
+              ]
+            }
+          },
+          stockInProbes: {
+            $sum: {
+              $cond: [{ $eq: ['$category', 'probs'] }, 1, 0]
+            }
+          },
+          stockInParts: {
+            $sum: {
+              $cond: [{ $eq: ['$category', 'parts'] }, 1, 0]
+            }
+          }
+        }
+      }
+    ];
     
-    const stats = {
-      totalStockValue: items.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 0)), 0),
-      itemsInStockMachines: items.filter(i => i.category === 'machines' && i.machineCategory === 'instock').length,
-      itemsSold: items.filter(i => i.machineCategory === 'sold' || i.status === 'Sold').length,
-      stockInProbes: items.filter(i => i.category === 'probs').length,
-      stockInParts: items.filter(i => i.category === 'parts').length,
+    const statsResult = await Inventory.aggregate(statsPipeline);
+    const stats = statsResult[0] || {
+      totalStockValue: 0,
+      itemsInStockMachines: 0,
+      itemsSold: 0,
+      stockInProbes: 0,
+      stockInParts: 0
     };
     
     res.json(stats);

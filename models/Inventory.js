@@ -50,5 +50,9 @@ const inventorySchema = new mongoose.Schema({
 inventorySchema.index({ category: 1 });
 inventorySchema.index({ categoryName: 1 });
 inventorySchema.index({ productName: 1 });
+inventorySchema.index({ createdAt: -1 });
+inventorySchema.index({ machineCategory: 1 });
+inventorySchema.index({ status: 1 });
+inventorySchema.index({ sN: 1 });
 
 module.exports = mongoose.model('Inventory', inventorySchema);

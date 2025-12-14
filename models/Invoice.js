@@ -61,6 +61,12 @@ const invoiceSchema = new mongoose.Schema({
   timestamps: true 
 });
 
+// Indexes for better query performance
+invoiceSchema.index({ createdAt: -1 });
+invoiceSchema.index({ date: -1 });
+invoiceSchema.index({ status: 1 });
+invoiceSchema.index({ customer: 1 });
+
 // Pre-save middleware to calculate totalAmount
 invoiceSchema.pre('save', function(next) {
   if (this.products && this.products.length > 0) {

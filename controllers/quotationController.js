@@ -5,24 +5,47 @@ const generateSequentialId = require('../utils/generateSequentialId');
 // Get all quotations
 exports.getAllQuotations = async (req, res) => {
   try {
-    const quotations = await Quotation.find().sort({ createdAt: -1 });
+    // Use lean() for better performance
+    const quotations = await Quotation.find().lean().sort({ createdAt: -1 });
     
     // Format quotations with id field
     const formattedQuotations = quotations.map(quo => ({
-      ...quo.toObject(),
+      ...quo,
       id: quo._id.toString(),
-      products: quo.products.map(prod => ({
-        ...prod.toObject(),
-        id: prod._id ? prod._id.toString() : prod.id
+      products: (quo.products || []).map(prod => ({
+        ...prod,
+        id: prod._id ? prod._id.toString() : (prod.id || Date.now().toString())
       }))
     }));
     
     if (req.query.includeStats === 'true') {
-      const stats = {
-        totalQuotations: quotations.length,
-        totalAmount: quotations.reduce((sum, quo) => sum + (quo.totalAmount || 0), 0),
-        accepted: quotations.filter(quo => quo.status === 'Accepted').length,
-        pending: quotations.filter(quo => quo.status === 'Pending').length,
+      // Use MongoDB aggregation for faster stats calculation
+      const statsPipeline = [
+        {
+          $group: {
+            _id: null,
+            totalQuotations: { $sum: 1 },
+            totalAmount: { $sum: { $ifNull: ['$totalAmount', 0] } },
+            accepted: {
+              $sum: {
+                $cond: [{ $eq: ['$status', 'Accepted'] }, 1, 0]
+              }
+            },
+            pending: {
+              $sum: {
+                $cond: [{ $eq: ['$status', 'Pending'] }, 1, 0]
+              }
+            }
+          }
+        }
+      ];
+      
+      const statsResult = await Quotation.aggregate(statsPipeline);
+      const stats = statsResult[0] || {
+        totalQuotations: 0,
+        totalAmount: 0,
+        accepted: 0,
+        pending: 0
       };
       
       return res.json({

@@ -54,7 +54,10 @@ const accountingEntrySchema = new mongoose.Schema({
   timestamps: true 
 });
 
-// Index for date-based queries
+// Indexes for better query performance
 accountingEntrySchema.index({ date: -1 });
+accountingEntrySchema.index({ category: 1 });
+accountingEntrySchema.index({ expenseType: 1 });
+accountingEntrySchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Accounting', accountingEntrySchema);
