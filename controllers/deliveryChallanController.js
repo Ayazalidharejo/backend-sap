@@ -56,14 +56,7 @@ exports.getDeliveryChallanById = async (req, res) => {
 // Create delivery challan
 exports.createDeliveryChallan = async (req, res) => {
   try {
-    // Validate required fields
-    if (!req.body.customer || !req.body.customer.trim()) {
-      return res.status(400).json({ message: 'Customer is required' });
-    }
-    if (!req.body.date) {
-      return res.status(400).json({ message: 'Date is required' });
-    }
-    
+    // Generate challan number, but allow flexible payload (no manual required-field validation)
     const challanNo = await generateSequentialId('DC', DeliveryChallan, 'challanNo');
     
     const challanData = { ...req.body };

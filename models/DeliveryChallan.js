@@ -1,9 +1,10 @@
 const mongoose = require('mongoose');
 
 // Item Schema
+// Relaxed so challans can be created without strict product details
 const itemSchema = new mongoose.Schema({
-  productName: { type: String, required: true },
-  quantity: { type: Number, required: true, min: 1 },
+  productName: { type: String, required: false },
+  quantity: { type: Number, required: false, min: 0 },
 }, { _id: true });
 
 // Delivery Challan Schema
@@ -11,17 +12,18 @@ const deliveryChallanSchema = new mongoose.Schema({
   challanNo: { 
     type: String, 
     unique: true, 
-    required: true,
+    required: false, // controller generates this; keep schema flexible
     uppercase: true 
   },
   date: { 
     type: Date, 
-    required: true, 
+    required: false, 
     default: Date.now 
   },
+  // Make customer optional so challans can be saved without selecting a customer
   customer: { 
     type: String, 
-    required: true,
+    required: false,
     trim: true 
   },
   customerId: { 
