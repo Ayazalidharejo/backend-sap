@@ -116,7 +116,9 @@ exports.createAccountingEntry = async (req, res) => {
     for (const e of entries) {
       balance = balance + (e.credit || 0) - (e.debit || 0);
       e.balance = balance;
-      await e.save();
+      // Skip full validation when recalculating historical balances to avoid
+      // failing on legacy records that might be missing fields like expenseType
+      await e.save({ validateBeforeSave: false });
     }
     
     // Return updated entry with proper balance
@@ -149,7 +151,7 @@ exports.updateAccountingEntry = async (req, res) => {
     for (const e of entries) {
       balance = balance + (e.credit || 0) - (e.debit || 0);
       e.balance = balance;
-      await e.save();
+      await e.save({ validateBeforeSave: false });
     }
     
     // Return updated entry with proper ID format
@@ -166,7 +168,22 @@ exports.updateAccountingEntry = async (req, res) => {
 // Delete accounting entry
 exports.deleteAccountingEntry = async (req, res) => {
   try {
-    await Accounting.findByIdAndDelete(req.params.id);
+    let deletedEntry;
+    try {
+      deletedEntry = await Accounting.findByIdAndDelete(req.params.id);
+    } catch (err) {
+      // Handle case where plugins/middleware throw when document is missing
+      if (err?.message && err.message.includes('No document found for query')) {
+        // Treat as already deleted – no error to frontend
+        return res.json({ message: 'Accounting entry already removed' });
+      }
+      throw err;
+    }
+
+    if (!deletedEntry) {
+      // If nothing was found, treat it as already deleted
+      return res.json({ message: 'Accounting entry already removed' });
+    }
     
     // Recalculate all balances
     const entries = await Accounting.find().sort({ date: 1 });
@@ -174,11 +191,15 @@ exports.deleteAccountingEntry = async (req, res) => {
     for (const e of entries) {
       balance = balance + (e.credit || 0) - (e.debit || 0);
       e.balance = balance;
-      await e.save();
+      await e.save({ validateBeforeSave: false });
     }
     
     res.json({ message: 'Accounting entry deleted successfully' });
   } catch (error) {
+    // As a last safety net, if this specific “no document found” bubbles up
+    if (error?.message && error.message.includes('No document found for query')) {
+      return res.json({ message: 'Accounting entry already removed' });
+    }
     res.status(500).json({ message: error.message });
   }
 };

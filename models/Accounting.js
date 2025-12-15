@@ -4,12 +4,12 @@ const mongoose = require('mongoose');
 const accountingEntrySchema = new mongoose.Schema({
   date: { 
     type: Date, 
-    required: true, 
+    required: false, 
     default: Date.now 
   },
   account: { 
     type: String, 
-    required: true,
+    required: false,
     trim: true 
   },
   debit: { 

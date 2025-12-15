@@ -1,9 +1,10 @@
 const mongoose = require('mongoose');
 
 // Ledger Entry Sub-document Schema
+// Relaxed so entries can be added with minimal data
 const ledgerEntrySchema = new mongoose.Schema({
-  date: { type: Date, required: true, default: Date.now },
-  particulars: { type: String, required: true },
+  date: { type: Date, required: false, default: Date.now },
+  particulars: { type: String, required: false },
   debitAmount: { type: Number, default: 0, min: 0 },
   creditAmount: { type: Number, default: 0, min: 0 },
   totalAmount: { type: Number, default: 0 },
@@ -15,12 +16,12 @@ const customerSchema = new mongoose.Schema({
   serialNumber: { 
     type: String, 
     unique: true, 
-    required: true,
+    required: false, // controller will generate; keep schema flexible
     uppercase: true 
   },
   customerName: { 
     type: String, 
-    required: true,
+    required: false,
     trim: true 
   },
   phoneNumber: { 

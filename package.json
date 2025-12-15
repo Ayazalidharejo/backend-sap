@@ -7,6 +7,9 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "seed": "node scripts/seedData.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
+    "list-backups": "node scripts/restore.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": ["medical", "service", "api", "mongodb"],

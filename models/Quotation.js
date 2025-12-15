@@ -1,11 +1,12 @@
 const mongoose = require('mongoose');
 
 // Product Item Schema
+// Relaxed validation so that empty/zero values are allowed and do not block saving
 const productSchema = new mongoose.Schema({
-  product: { type: String, required: true },
-  quantity: { type: Number, required: true, min: 1 },
-  unitPrice: { type: Number, required: true, min: 0 },
-  total: { type: Number, required: true, min: 0 },
+  product: { type: String, required: false },
+  quantity: { type: Number, required: false, min: 0 },
+  unitPrice: { type: Number, required: false, min: 0, default: 0 },
+  total: { type: Number, required: false, min: 0, default: 0 },
 }, { _id: true });
 
 // Quotation Schema
@@ -13,17 +14,18 @@ const quotationSchema = new mongoose.Schema({
   quotationNo: { 
     type: String, 
     unique: true, 
-    required: true,
+    required: false,
     uppercase: true 
   },
   date: { 
     type: Date, 
-    required: true, 
+    required: false, 
     default: Date.now 
   },
+  // Make customer optional so quotations can be saved without selecting a customer
   customer: { 
     type: String, 
-    required: true,
+    required: false,
     trim: true 
   },
   customerId: { 
@@ -44,10 +46,12 @@ const quotationSchema = new mongoose.Schema({
     trim: true 
   },
   products: [productSchema],
+  // totalAmount is derived from products; make it optional with default 0
   totalAmount: { 
     type: Number, 
-    required: true, 
-    min: 0 
+    required: false, 
+    min: 0,
+    default: 0,
   },
   status: { 
     type: String, 
