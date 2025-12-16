@@ -11,7 +11,6 @@ const inventorySchema = new mongoose.Schema({
   pN: { type: String, trim: true }, // Product Number
   serialNo: { type: String, trim: true },
   boxNo: { type: String, trim: true },
-  modelNo: { type: String, trim: true },
   productName: { type: String, trim: true },
   partName: { type: String, trim: true },
   probes: { type: String, trim: true },
@@ -37,6 +36,16 @@ const inventorySchema = new mongoose.Schema({
   buyerName: { type: String, trim: true },
   buyerSerial: { type: String, trim: true },
   buyerCity: { type: String, trim: true },
+  
+  // Sale metadata (for tracking last sale)
+  lastSoldQuantity: { type: Number, min: 0 },
+  lastSoldUnitPrice: { type: Number, min: 0 },
+  lastSoldTotal: { type: Number, min: 0 },
+  lastSoldDate: { type: Date },
+  lastSoldCustomer: { type: String, trim: true },
+  
+  // Flag to identify sold entries (separate from stock items)
+  isSoldEntry: { type: Boolean, default: false },
   
   date: { 
     type: Date, 

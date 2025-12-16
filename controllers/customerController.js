@@ -233,8 +233,15 @@ exports.deleteLedgerEntry = async (req, res) => {
     }
     
     const entryId = req.params.entryId;
-    customer.ledger.id(entryId).remove();
+    const ledgerEntry = customer.ledger.id(entryId);
     
+    if (!ledgerEntry) {
+      return res.status(404).json({ message: 'Ledger entry not found' });
+    }
+    
+    // Use pull() method to remove subdocument (works in all Mongoose versions)
+    customer.ledger.pull(entryId);
+    await customer.save();
     await customer.recalculateBalance();
     
     // Format response with id field
@@ -243,7 +250,8 @@ exports.deleteLedgerEntry = async (req, res) => {
       id: customer._id.toString()
     });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Error deleting ledger entry:', error);
+    res.status(400).json({ message: error.message || 'Failed to delete ledger entry' });
   }
 };
 

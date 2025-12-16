@@ -9,6 +9,8 @@ const ledgerEntrySchema = new mongoose.Schema({
   creditAmount: { type: Number, default: 0, min: 0 },
   totalAmount: { type: Number, default: 0 },
   reference: String, // Invoice/Quotation reference
+  quantity: { type: Number, default: 0 }, // Quantity for sale entries
+  unitPrice: { type: Number, default: 0 }, // Unit price for sale entries
 }, { timestamps: true });
 
 // Main Customer Schema

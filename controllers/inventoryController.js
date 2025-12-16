@@ -127,7 +127,7 @@ exports.createInventoryItem = async (req, res) => {
     const { category } = req.body;
     
     // Generate IDs based on category (only if not provided)
-    let pN, serialNo, boxNo, modelNo, sN;
+    let pN, serialNo, boxNo, sN;
     
     // Get max S/N (only if not provided)
     if (!req.body.sN) {
@@ -140,18 +140,13 @@ exports.createInventoryItem = async (req, res) => {
     // Generate other IDs based on category (only if not provided)
     if (category === 'machines') {
       // For machines: all fields should be provided manually, auto-generate only if not provided
-      if (!req.body.modelNo) {
-        modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
-      }
     } else if (category === 'productsCategory') {
       if (!req.body.pN) pN = await generateSequentialId('PN', Inventory, 'pN');
       if (!req.body.serialNo) serialNo = await generateSequentialId('MCH', Inventory, 'serialNo');
-      if (!req.body.modelNo) modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
     } else if (category === 'probs') {
       if (!req.body.boxNo) boxNo = await generateSequentialId('BX', Inventory, 'boxNo');
-      if (!req.body.modelNo) modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
     } else if (category === 'parts') {
-      if (!req.body.modelNo) modelNo = await generateSequentialId('MOD', Inventory, 'modelNo');
+      // No auto-generation needed for parts
     } else if (category === 'importStock') {
       if (!req.body.serialNo) serialNo = await generateSequentialId('IMP', Inventory, 'serialNo');
     }
@@ -163,7 +158,6 @@ exports.createInventoryItem = async (req, res) => {
       pN: req.body.pN || pN,
       serialNo: req.body.serialNo || serialNo,
       boxNo: req.body.boxNo || boxNo,
-      modelNo: req.body.modelNo || modelNo,
     });
     
     await item.save();
