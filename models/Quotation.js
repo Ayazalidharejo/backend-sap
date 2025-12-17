@@ -83,7 +83,7 @@ const quotationSchema = new mongoose.Schema({
   },
   termsAndConditions: {
     type: [String],
-    default: ['PAYMENT: 30% IN ADVANCE', 'VALIDITY: 30 DAYS']
+    default: ['PAYMENT: 30% IN ADVANCE', 'VALIDITY: 45 DAYS']
   },
   // Links created when quotation is Accepted
   linkedInvoiceId: {
@@ -106,15 +106,10 @@ quotationSchema.index({ customer: 1 });
 
 // Pre-save middleware to calculate totals + defaults
 quotationSchema.pre('save', function(next) {
-  // Ensure referenceNo defaults to quotationNo
-  if (!this.referenceNo && this.quotationNo) {
-    this.referenceNo = String(this.quotationNo).toUpperCase()
-  }
-
-  // Default validUntil: 30 days from quotation date (or today)
+  // Default validUntil: 45 days from quotation date (or today)
   if (!this.validUntil) {
     const base = this.date ? new Date(this.date) : new Date()
-    this.validUntil = new Date(base.getTime() + 30 * 24 * 60 * 60 * 1000)
+    this.validUntil = new Date(base.getTime() + 45 * 24 * 60 * 60 * 1000)
   }
 
   if (this.products && this.products.length > 0) {

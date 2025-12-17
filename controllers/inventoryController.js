@@ -370,7 +370,7 @@ exports.createInventoryItem = async (req, res) => {
     const { category } = req.body;
     
     // Generate IDs based on category (only if not provided)
-    let pN, serialNo, boxNo, sN;
+    let pN, serialNo, sN;
     
     // Get max S/N (only if not provided)
     if (!req.body.sN) {
@@ -387,20 +387,43 @@ exports.createInventoryItem = async (req, res) => {
       if (!req.body.pN) pN = await generateSequentialId('PN', Inventory, 'pN');
       if (!req.body.serialNo) serialNo = await generateSequentialId('MCH', Inventory, 'serialNo');
     } else if (category === 'probs') {
-      if (!req.body.boxNo) boxNo = await generateSequentialId('BX', Inventory, 'boxNo');
+      // Box No should be entered manually for probes
+      if (!req.body.boxNo) {
+        return res.status(400).json({ message: 'Box No is required for probes' });
+      }
     } else if (category === 'parts') {
       // No auto-generation needed for parts
     } else if (category === 'importStock') {
-      if (!req.body.serialNo) serialNo = await generateSequentialId('IMP', Inventory, 'serialNo');
+      // Serial No should be entered manually for import stock
+      if (!req.body.serialNo) {
+        return res.status(400).json({ message: 'Serial No is required for import stock' });
+      }
     }
     
+    // Set initialQuantity only for stock items (not for sold-entry rows)
+    const isSoldEntry = req.body.isSoldEntry === true
+    let initialQuantity
+    if (!isSoldEntry) {
+      if (category === 'machines') {
+        // machines are typically single items; default initial to 1 if not provided
+        const q = req.body.quantity
+        initialQuantity = typeof q === 'number' ? q : (q !== undefined ? parseInt(q) : 1)
+        if (!Number.isFinite(initialQuantity) || initialQuantity < 0) initialQuantity = 1
+      } else {
+        const q = req.body.quantity
+        initialQuantity = typeof q === 'number' ? q : (q !== undefined ? parseInt(q) : 0)
+        if (!Number.isFinite(initialQuantity) || initialQuantity < 0) initialQuantity = 0
+      }
+    }
+
     const item = new Inventory({
       ...req.body,
       sN: req.body.sN || sN,
       // Use provided values, fallback to auto-generated only if not provided
       pN: req.body.pN || pN,
       serialNo: req.body.serialNo || serialNo,
-      boxNo: req.body.boxNo || boxNo,
+      boxNo: req.body.boxNo,
+      ...(initialQuantity !== undefined ? { initialQuantity } : {})
     });
     
     await item.save();

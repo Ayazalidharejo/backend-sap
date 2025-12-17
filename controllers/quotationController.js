@@ -134,9 +134,11 @@ exports.updateQuotation = async (req, res) => {
     await quotation.save();
     
     // Auto-generate Invoice + Delivery Challan if status changed to "Accepted"
-    // Both will share referenceNo = quotationNo (so all three match).
+    // Both will share the same referenceNo (REFxxx) so all three match.
     if (isNowAccepted && !wasAccepted) {
-      const referenceNo = (quotation.quotationNo || '').toUpperCase()
+      // Generate referenceNo ONLY on first acceptance
+      const referenceNo = (quotation.referenceNo || await generateSequentialId('REF', Quotation, 'referenceNo')).toUpperCase()
+      quotation.referenceNo = referenceNo
 
       // ===== Invoice (idempotent) =====
       let invoice = await Invoice.findOne({
@@ -172,6 +174,10 @@ exports.updateQuotation = async (req, res) => {
         });
 
         await invoice.save();
+      } else if (!invoice.referenceNo && referenceNo) {
+        // Backfill referenceNo for older invoices created before this feature existed
+        invoice.referenceNo = referenceNo
+        await invoice.save()
       }
 
       // ===== Delivery Challan (idempotent) =====
@@ -207,12 +213,15 @@ exports.updateQuotation = async (req, res) => {
         });
 
         await challan.save();
+      } else if (!challan.referenceNo && referenceNo) {
+        // Backfill referenceNo for older challans created before this feature existed
+        challan.referenceNo = referenceNo
+        await challan.save()
       }
 
       // Link back to quotation (best-effort)
       quotation.linkedInvoiceId = invoice?._id || quotation.linkedInvoiceId
       quotation.linkedDeliveryChallanId = challan?._id || quotation.linkedDeliveryChallanId
-      quotation.referenceNo = referenceNo || quotation.referenceNo
       await quotation.save()
     }
     

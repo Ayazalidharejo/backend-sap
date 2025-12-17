@@ -10,7 +10,7 @@ exports.getAllDeliveryChallans = async (req, res) => {
     const formattedChallans = challans.map(challan => ({
       ...challan.toObject(),
       id: challan._id.toString(),
-      items: challan.items ? challan.items.length : 0 // Convert items array to count if needed
+      itemsCount: challan.items ? challan.items.length : 0 // Keep items array + provide count for UI
     }));
     
     if (req.query.includeStats === 'true') {
@@ -46,7 +46,7 @@ exports.getDeliveryChallanById = async (req, res) => {
     res.json({
       ...challan.toObject(),
       id: challan._id.toString(),
-      items: challan.items ? challan.items.length : 0
+      itemsCount: challan.items ? challan.items.length : 0
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -90,7 +90,7 @@ exports.createDeliveryChallan = async (req, res) => {
     res.status(201).json({
       ...challan.toObject(),
       id: challan._id.toString(),
-      items: challan.items ? challan.items.length : 0
+      itemsCount: challan.items ? challan.items.length : 0
     });
   } catch (error) {
     if (error.code === 11000) {
@@ -135,7 +135,7 @@ exports.updateDeliveryChallan = async (req, res) => {
     // Format response with id field and items count
     const response = challan.toObject()
     response.id = challan._id.toString()
-    response.items = challan.items ? challan.items.length : 0 // Frontend expects count
+    response.itemsCount = challan.items ? challan.items.length : 0 // Keep items array + provide count
     
     res.json(response);
   } catch (error) {

@@ -43,6 +43,13 @@ const inventorySchema = new mongoose.Schema({
   lastSoldTotal: { type: Number, min: 0 },
   lastSoldDate: { type: Date },
   lastSoldCustomer: { type: String, trim: true },
+
+  // Total sold quantity (cumulative across sales for the stock item)
+  totalSoldQuantity: { type: Number, default: 0, min: 0 },
+
+  // Initial quantity (first time added stock). Used for reporting: Initial / Sold / Current.
+  // Not meaningful for sold-entry rows (isSoldEntry=true).
+  initialQuantity: { type: Number, min: 0 },
   
   // Flag to identify sold entries (separate from stock items)
   isSoldEntry: { type: Boolean, default: false },
