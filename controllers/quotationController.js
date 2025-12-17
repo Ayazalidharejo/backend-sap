@@ -1,5 +1,6 @@
 const Quotation = require('../models/Quotation');
 const Invoice = require('../models/Invoice');
+const DeliveryChallan = require('../models/DeliveryChallan');
 const generateSequentialId = require('../utils/generateSequentialId');
 
 // Get all quotations
@@ -132,25 +133,87 @@ exports.updateQuotation = async (req, res) => {
     });
     await quotation.save();
     
-    // Auto-generate invoice if status changed to "Accepted"
+    // Auto-generate Invoice + Delivery Challan if status changed to "Accepted"
+    // Both will share referenceNo = quotationNo (so all three match).
     if (isNowAccepted && !wasAccepted) {
-      const invoiceNo = await generateSequentialId('INV', Invoice, 'invoiceNo');
-      
-      const invoice = new Invoice({
-        invoiceNo,
-        date: new Date(),
-        customer: quotation.customer,
-        customerId: quotation.customerId,
-        subject: quotation.subject || `Invoice for ${quotation.quotationNo}`,
-        address: quotation.address,
-        email: quotation.email || 'duamedicalservice@gmail.com',
-        products: quotation.products,
-        totalAmount: quotation.totalAmount,
-        status: 'Pending',
-        dueDate: quotation.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+      const referenceNo = (quotation.quotationNo || '').toUpperCase()
+
+      // ===== Invoice (idempotent) =====
+      let invoice = await Invoice.findOne({
+        $or: [
+          { sourceQuotationId: quotation._id },
+          // Backward-compat: older auto-created invoices used this subject format
+          { subject: `Invoice for ${quotation.quotationNo}` },
+          ...(referenceNo ? [{ referenceNo }] : [])
+        ]
       });
-      
-      await invoice.save();
+
+      if (!invoice) {
+        const invoiceNo = await generateSequentialId('INV', Invoice, 'invoiceNo');
+
+        invoice = new Invoice({
+          invoiceNo,
+          referenceNo,
+          sourceQuotationId: quotation._id,
+          date: quotation.date || new Date(),
+          customer: quotation.customer,
+          customerId: quotation.customerId,
+          subject: quotation.subject || `Invoice for ${quotation.quotationNo}`,
+          address: quotation.address,
+          email: quotation.email || 'duamedicalservice@gmail.com',
+          products: quotation.products,
+          // Carry tax config forward
+          salesTaxEnabled: quotation.salesTaxEnabled,
+          salesTaxRate: quotation.salesTaxRate,
+          fbrTaxEnabled: quotation.fbrTaxEnabled,
+          fbrTaxRate: quotation.fbrTaxRate,
+          status: 'Pending',
+          dueDate: quotation.validUntil, // already defaults to +30 days in model
+        });
+
+        await invoice.save();
+      }
+
+      // ===== Delivery Challan (idempotent) =====
+      let challan = await DeliveryChallan.findOne({
+        $or: [
+          { sourceQuotationId: quotation._id },
+          ...(referenceNo ? [{ referenceNo }] : [])
+        ]
+      });
+
+      if (!challan) {
+        const challanNo = await generateSequentialId('DC', DeliveryChallan, 'challanNo');
+
+        const challanItems = Array.isArray(quotation.products)
+          ? quotation.products
+              .filter(p => (p && (p.product || '').trim()) !== '')
+              .map(p => ({
+                productName: p.product,
+                quantity: p.quantity || 0
+              }))
+          : [];
+
+        challan = new DeliveryChallan({
+          challanNo,
+          referenceNo,
+          sourceQuotationId: quotation._id,
+          date: quotation.date || new Date(),
+          customer: quotation.customer,
+          customerId: quotation.customerId,
+          items: challanItems,
+          status: 'Pending',
+          vehicleNo: ''
+        });
+
+        await challan.save();
+      }
+
+      // Link back to quotation (best-effort)
+      quotation.linkedInvoiceId = invoice?._id || quotation.linkedInvoiceId
+      quotation.linkedDeliveryChallanId = challan?._id || quotation.linkedDeliveryChallanId
+      quotation.referenceNo = referenceNo || quotation.referenceNo
+      await quotation.save()
     }
     
     // Format response with id field

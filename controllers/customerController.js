@@ -110,7 +110,7 @@ exports.createCustomer = async (req, res) => {
 // Update customer
 exports.updateCustomer = async (req, res) => {
   try {
-    const { customerName, phoneNumber, city } = req.body;
+    const { customerName, phoneNumber, city, amount, debitCredit } = req.body;
     
     const customer = await Customer.findById(req.params.id);
     
@@ -121,8 +121,43 @@ exports.updateCustomer = async (req, res) => {
     if (customerName) customer.customerName = customerName;
     if (phoneNumber !== undefined) customer.phoneNumber = phoneNumber;
     if (city !== undefined) customer.city = city;
+
+    // Optional: update Initial Balance (so "Amount" + "Payment Type" changes actually reflect in list)
+    if (amount !== undefined && debitCredit !== undefined) {
+      const normalizedAmount = Math.abs(parseFloat(amount) || 0);
+      const type = debitCredit === 'Credit' ? 'Credit' : 'Debit';
+
+      // Find existing initial balance entry
+      let initialIndex = customer.ledger.findIndex(
+        (e) => (e.particulars || '').toLowerCase().trim() === 'initial balance'
+      );
+
+      if (initialIndex === -1) {
+        // Put initial balance at the start so running totals remain correct
+        customer.ledger.unshift({
+          date: customer.createdAt || new Date(),
+          particulars: 'Initial Balance',
+          debitAmount: type === 'Debit' ? normalizedAmount : 0,
+          creditAmount: type === 'Credit' ? normalizedAmount : 0,
+          totalAmount: 0,
+        });
+        initialIndex = 0;
+      } else {
+        // Ensure initial balance stays first (running totals depend on order)
+        if (initialIndex > 0) {
+          const [initialEntry] = customer.ledger.splice(initialIndex, 1);
+          customer.ledger.unshift(initialEntry);
+          initialIndex = 0;
+        }
+
+        customer.ledger[initialIndex].particulars = 'Initial Balance';
+        customer.ledger[initialIndex].debitAmount = type === 'Debit' ? normalizedAmount : 0;
+        customer.ledger[initialIndex].creditAmount = type === 'Credit' ? normalizedAmount : 0;
+      }
+    }
     
-    await customer.save();
+    // Save + recalc balance
+    await customer.recalculateBalance();
     
     // Format response with id field
     res.json({
@@ -158,7 +193,7 @@ exports.addLedgerEntry = async (req, res) => {
       return res.status(404).json({ message: 'Customer not found' });
     }
     
-    const { date, particulars, debitAmount, creditAmount, reference } = req.body;
+    const { date, particulars, debitAmount, creditAmount, reference, quantity, unitPrice } = req.body;
     
     const entry = {
       date: date ? new Date(date) : new Date(),
@@ -166,6 +201,9 @@ exports.addLedgerEntry = async (req, res) => {
       debitAmount: parseFloat(debitAmount) || 0,
       creditAmount: parseFloat(creditAmount) || 0,
       reference,
+      // Optional sale metadata (Inventory/Sales flows send these)
+      quantity: quantity !== undefined ? (parseFloat(quantity) || 0) : 0,
+      unitPrice: unitPrice !== undefined ? (parseFloat(unitPrice) || 0) : 0,
     };
     
     const previousBalance = customer.totalBalance || 0;
@@ -200,12 +238,14 @@ exports.updateLedgerEntry = async (req, res) => {
       return res.status(404).json({ message: 'Ledger entry not found' });
     }
     
-    const { date, particulars, debitAmount, creditAmount, reference } = req.body;
+    const { date, particulars, debitAmount, creditAmount, reference, quantity, unitPrice } = req.body;
     if (date) entry.date = new Date(date);
     if (particulars) entry.particulars = particulars;
     if (debitAmount !== undefined) entry.debitAmount = parseFloat(debitAmount) || 0;
     if (creditAmount !== undefined) entry.creditAmount = parseFloat(creditAmount) || 0;
     if (reference !== undefined) entry.reference = reference;
+    if (quantity !== undefined) entry.quantity = parseFloat(quantity) || 0;
+    if (unitPrice !== undefined) entry.unitPrice = parseFloat(unitPrice) || 0;
     
     await customer.recalculateBalance();
     

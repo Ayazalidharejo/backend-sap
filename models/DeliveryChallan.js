@@ -15,6 +15,17 @@ const deliveryChallanSchema = new mongoose.Schema({
     required: false, // controller generates this; keep schema flexible
     uppercase: true 
   },
+  // Shared reference number across Quotation/Invoice/Delivery Challan (usually the Quotation No)
+  referenceNo: {
+    type: String,
+    trim: true,
+    uppercase: true
+  },
+  // Link back to source quotation (used to prevent duplicate auto-creates)
+  sourceQuotationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Quotation'
+  },
   date: { 
     type: Date, 
     required: false, 
