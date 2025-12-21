@@ -1,81 +1,79 @@
 const Inventory = require('../models/Inventory');
 const generateSequentialId = require('../utils/generateSequentialId');
 
-// Get all inventory items (with optional category filter)
+// Helper function to determine normalized status for any item
+const getNormalizedStatus = (item) => {
+  // Check if item is sold
+  const isSold = item.isSoldEntry === true ||
+                 item.machineCategory === 'sold' ||
+                 item.status === 'Sold' ||
+                 (item.category === 'productsCategory' && (item.quantity || 0) === 0 && item.buyerName) ||
+                 (item.buyerName && (item.quantity || 0) === 0);
+  
+  if (isSold) {
+    return 'Sold';
+  }
+  
+  // Check if item is in repair
+  if (item.machineCategory === 'repair' || item.status === 'Repair Items') {
+    return 'Repair';
+  }
+  
+  // For machines: check machineCategory
+  if (item.category === 'machines') {
+    if (item.machineCategory === 'instock' || !item.machineCategory) {
+      return 'InStock';
+    }
+    return item.machineCategory === 'sold' ? 'Sold' : 'Repair';
+  }
+  
+  // For importStock: use status field if available
+  if (item.category === 'importStock') {
+    if (item.status) {
+      // Normalize 'Repair Items' to 'Repair'
+      if (item.status === 'Repair Items') {
+        return 'Repair';
+      }
+      return item.status; // 'InStock', 'Sold', or 'Repair'
+    }
+    // Default to InStock if no status
+    return 'InStock';
+  }
+  
+  // For other categories (probs, parts, productsCategory): default to InStock
+  // unless explicitly sold (checked above)
+  return 'InStock';
+};
+
+// Get all inventory items (with optional status filter)
 exports.getAllInventory = async (req, res) => {
   try {
-    const { category, machineStatus } = req.query;
-    let query = category ? { category } : {};
+    const { status } = req.query;
     
-    // Add machineCategory filter for machines if machineStatus is provided
-    if (category === 'machines' && machineStatus) {
-      // machineStatus can be comma-separated values like "instock,repair,sold"
-      const statusArray = machineStatus.split(',').map(s => s.trim()).filter(s => s.length > 0);
-      if (statusArray.length > 0) {
-        // Handle null/undefined machineCategory as 'instock' (default)
-        // If 'instock' is in the filter, also include items where machineCategory is null/undefined
-        if (statusArray.includes('instock')) {
-          // Use $or to include items with null/undefined machineCategory when filtering for 'instock'
-          query = {
-            category: 'machines',
-            $or: [
-              { machineCategory: { $in: statusArray } },
-              { machineCategory: { $exists: false } },
-              { machineCategory: null }
-            ]
-          };
-        } else {
-          // For other filters (repair, sold), only match exact values
-          query = {
-            category: 'machines',
-            machineCategory: { $in: statusArray }
-          };
-        }
-      }
-      console.log('🔍 Backend Machines Filter:', {
-        category,
-        machineStatus,
-        statusArray,
-        query: JSON.stringify(query),
-        queryObject: query
-      });
-    } else if (category === 'machines') {
-      // If machines category but no machineStatus, show all machines
-      console.log('🔍 Backend Machines (No Filter):', {
-        category,
-        query: JSON.stringify(query)
-      });
-    }
+    // Fetch all items (no status filter in query, we'll filter after normalizing)
+    const items = await Inventory.find({}).lean().sort({ createdAt: -1 });
     
-    // Use lean() for better performance - returns plain JavaScript objects
-    const items = await Inventory.find(query).lean().sort({ createdAt: -1 });
-    
-    // Debug log for machines
-    if (category === 'machines') {
-      console.log('📦 Backend Machines Results:', {
-        totalItems: items.length,
-        items: items.map(item => ({
-          id: item._id.toString(),
-          productName: item.productName,
-          machineCategory: item.machineCategory
-        }))
-      });
-    }
-    
-    // Format items with id field - preserve original category, add itemType field
-    const formattedItems = items.map(item => {
+    // Format items with normalized status field
+    let formattedItems = items.map(item => {
       const originalCategory = item.category // Preserve: 'machines', 'probs', 'parts', 'productsCategory', 'importStock'
+      const normalizedStatus = getNormalizedStatus(item);
       
       return {
         ...item,
         id: item._id.toString(),
         itemType: originalCategory, // Keep original category as itemType
+        status: normalizedStatus, // Always set normalized status
         // For machines: category becomes machineCategory value (instock/repair/sold) for display
         // For importStock: category becomes categoryName for display
         category: originalCategory === 'machines' ? (item.machineCategory || 'instock') : 
                   (originalCategory === 'importStock' && item.categoryName ? item.categoryName : originalCategory)
       }
     });
+    
+    // Apply status filter if provided
+    if (status) {
+      formattedItems = formattedItems.filter(item => item.status === status);
+    }
     
     if (req.query.includeStats === 'true') {
       // Use MongoDB aggregation for faster stats calculation
