@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 // Relaxed so challans can be created without strict product details
 const itemSchema = new mongoose.Schema({
   productName: { type: String, required: false },
+  description: { type: String, required: false, trim: true },
   quantity: { type: Number, required: false, min: 0 },
 }, { _id: true });
 

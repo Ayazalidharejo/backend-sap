@@ -196,6 +196,7 @@ exports.updateQuotation = async (req, res) => {
               .filter(p => (p && (p.product || '').trim()) !== '')
               .map(p => ({
                 productName: p.product,
+                description: p.description || '',
                 quantity: p.quantity || 0
               }))
           : [];
