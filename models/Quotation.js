@@ -5,12 +5,12 @@ const mongoose = require('mongoose');
 const productSchema = new mongoose.Schema({
   product: { type: String, required: false },
   description: { type: String, required: false, trim: true },
+  buyDescription: { type: String, required: false, trim: true },
   quantity: { type: Number, required: false, min: 0 },
   unitPrice: { type: Number, required: false, min: 0, default: 0 },
   total: { type: Number, required: false, min: 0, default: 0 },
   buyPrice: { type: Number, required: false, min: 0, default: 0 },
   sellPrice: { type: Number, required: false, min: 0, default: 0 },
-  profit: { type: Number, required: false, default: 0 },
 }, { _id: true });
 
 // Quotation Schema
@@ -110,6 +110,11 @@ quotationSchema.index({ customer: 1 });
 
 // Pre-save middleware to calculate totals + defaults
 quotationSchema.pre('save', function(next) {
+  // Set referenceNo to quotationNo if not set or if quotationNo changes
+  if (this.quotationNo && (!this.referenceNo || this.isModified('quotationNo'))) {
+    this.referenceNo = this.quotationNo
+  }
+  
   // Default validUntil: 45 days from quotation date (or today)
   if (!this.validUntil) {
     const base = this.date ? new Date(this.date) : new Date()

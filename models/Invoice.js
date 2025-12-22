@@ -98,6 +98,11 @@ invoiceSchema.index({ customer: 1 });
 
 // Pre-save middleware to calculate totals (subtotal + taxes)
 invoiceSchema.pre('save', function(next) {
+  // Set referenceNo to invoiceNo if not set or if invoiceNo changes
+  if (this.invoiceNo && (!this.referenceNo || this.isModified('invoiceNo'))) {
+    this.referenceNo = this.invoiceNo
+  }
+  
   if (this.products && this.products.length > 0) {
     this.subTotal = this.products.reduce((sum, product) => {
       return sum + (product.total || 0);

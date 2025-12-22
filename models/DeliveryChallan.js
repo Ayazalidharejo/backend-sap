@@ -42,6 +42,10 @@ const deliveryChallanSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Customer' 
   },
+  address: { 
+    type: String, 
+    trim: true 
+  },
   items: [itemSchema],
   status: { 
     type: String, 
@@ -54,6 +58,15 @@ const deliveryChallanSchema = new mongoose.Schema({
   },
 }, { 
   timestamps: true 
+});
+
+// Pre-save middleware to set referenceNo to challanNo
+deliveryChallanSchema.pre('save', function(next) {
+  // Set referenceNo to challanNo if not set or if challanNo changes
+  if (this.challanNo && (!this.referenceNo || this.isModified('challanNo'))) {
+    this.referenceNo = this.challanNo
+  }
+  next();
 });
 
 module.exports = mongoose.model('DeliveryChallan', deliveryChallanSchema);

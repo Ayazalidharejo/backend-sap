@@ -134,16 +134,23 @@ exports.updateQuotation = async (req, res) => {
     await quotation.save();
     
     // Auto-generate Invoice + Delivery Challan if status changed to "Accepted"
-    // Both will share the same referenceNo (REFxxx) so all three match.
+    // All three will share the same number (quotationNo) so they match.
     if (isNowAccepted && !wasAccepted) {
-      // Generate referenceNo ONLY on first acceptance
-      const referenceNo = (quotation.referenceNo || await generateSequentialId('REF', Quotation, 'referenceNo')).toUpperCase()
-      quotation.referenceNo = referenceNo
+      // Use quotationNo as the common number for all three documents
+      const commonNumber = quotation.quotationNo || await generateSequentialId('QUO', Quotation, 'quotationNo')
+      const referenceNo = commonNumber.toUpperCase()
+      
+      // Set referenceNo to quotationNo if not already set
+      if (!quotation.referenceNo) {
+        quotation.referenceNo = referenceNo
+        await quotation.save()
+      }
 
       // ===== Invoice (idempotent) =====
       let invoice = await Invoice.findOne({
         $or: [
           { sourceQuotationId: quotation._id },
+          { invoiceNo: commonNumber },
           // Backward-compat: older auto-created invoices used this subject format
           { subject: `Invoice for ${quotation.quotationNo}` },
           ...(referenceNo ? [{ referenceNo }] : [])
@@ -151,7 +158,8 @@ exports.updateQuotation = async (req, res) => {
       });
 
       if (!invoice) {
-        const invoiceNo = await generateSequentialId('INV', Invoice, 'invoiceNo');
+        // Use quotationNo as invoiceNo (same number)
+        const invoiceNo = commonNumber
 
         invoice = new Invoice({
           invoiceNo,
@@ -160,7 +168,7 @@ exports.updateQuotation = async (req, res) => {
           date: quotation.date || new Date(),
           customer: quotation.customer,
           customerId: quotation.customerId,
-          subject: quotation.subject || `Invoice for ${quotation.quotationNo}`,
+          subject: quotation.subject || `Invoice for ${invoiceNo}`,
           address: quotation.address,
           email: quotation.email || 'duamedicalservice@gmail.com',
           products: quotation.products,
@@ -174,6 +182,7 @@ exports.updateQuotation = async (req, res) => {
         });
 
         await invoice.save();
+        console.log(`✅ Auto-generated Invoice with number: ${invoiceNo}`)
       } else if (!invoice.referenceNo && referenceNo) {
         // Backfill referenceNo for older invoices created before this feature existed
         invoice.referenceNo = referenceNo
@@ -184,12 +193,14 @@ exports.updateQuotation = async (req, res) => {
       let challan = await DeliveryChallan.findOne({
         $or: [
           { sourceQuotationId: quotation._id },
+          { challanNo: commonNumber },
           ...(referenceNo ? [{ referenceNo }] : [])
         ]
       });
 
       if (!challan) {
-        const challanNo = await generateSequentialId('DC', DeliveryChallan, 'challanNo');
+        // Use quotationNo as challanNo (same number)
+        const challanNo = commonNumber
 
         const challanItems = Array.isArray(quotation.products)
           ? quotation.products
@@ -208,12 +219,14 @@ exports.updateQuotation = async (req, res) => {
           date: quotation.date || new Date(),
           customer: quotation.customer,
           customerId: quotation.customerId,
+          address: quotation.address || '',
           items: challanItems,
           status: 'Pending',
           vehicleNo: ''
         });
 
         await challan.save();
+        console.log(`✅ Auto-generated Delivery Challan with number: ${challanNo}`)
       } else if (!challan.referenceNo && referenceNo) {
         // Backfill referenceNo for older challans created before this feature existed
         challan.referenceNo = referenceNo
@@ -224,6 +237,8 @@ exports.updateQuotation = async (req, res) => {
       quotation.linkedInvoiceId = invoice?._id || quotation.linkedInvoiceId
       quotation.linkedDeliveryChallanId = challan?._id || quotation.linkedDeliveryChallanId
       await quotation.save()
+      
+      console.log(`✅ Quotation ${quotation.quotationNo} accepted - Invoice and Delivery Challan auto-generated with same number`)
     }
     
     // Format response with id field
