@@ -24,9 +24,13 @@ const connectDB = async () => {
       retryWrites: true,
       retryReads: true,
       maxPoolSize: 10, // Maintain up to 10 socket connections
-      serverSelectionTimeoutMS: 30000, // 30 seconds for server selection
-      socketTimeoutMS: 60000, // 60 seconds for socket operations
-      connectTimeoutMS: 30000, // 30 seconds for initial connection
+      serverSelectionTimeoutMS: 120000, // 120 seconds for server selection (increased from 60)
+      socketTimeoutMS: 300000, // 300 seconds (5 minutes) for socket operations (increased from 120)
+      connectTimeoutMS: 120000, // 120 seconds for initial connection (increased from 60)
+      bufferMaxEntries: 0, // Disable mongoose buffering (prevents buffering timeout errors)
+      bufferCommands: false, // Disable mongoose buffering
+      maxIdleTimeMS: 300000, // 5 minutes before closing idle connections
+      heartbeatFrequencyMS: 10000, // Send heartbeat every 10 seconds to keep connection alive
     });
 
     console.log(`✅ MongoDB Connected Successfully!`);
