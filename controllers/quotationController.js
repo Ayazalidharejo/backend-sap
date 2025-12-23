@@ -133,26 +133,29 @@ exports.updateQuotation = async (req, res) => {
     });
     await quotation.save();
     
+    // Reload quotation to ensure we have the latest data including all product fields
+    const updatedQuotation = await Quotation.findById(quotation._id);
+    
     // Auto-generate Invoice + Delivery Challan if status changed to "Accepted"
     // All three will share the same number (quotationNo) so they match.
     if (isNowAccepted && !wasAccepted) {
       // Use quotationNo as the common number for all three documents
-      const commonNumber = quotation.quotationNo || await generateSequentialId('QUO', Quotation, 'quotationNo')
+      const commonNumber = updatedQuotation.quotationNo || await generateSequentialId('QUO', Quotation, 'quotationNo')
       const referenceNo = commonNumber.toUpperCase()
       
       // Set referenceNo to quotationNo if not already set
-      if (!quotation.referenceNo) {
-        quotation.referenceNo = referenceNo
-        await quotation.save()
+      if (!updatedQuotation.referenceNo) {
+        updatedQuotation.referenceNo = referenceNo
+        await updatedQuotation.save()
       }
 
       // ===== Invoice (idempotent) =====
       let invoice = await Invoice.findOne({
         $or: [
-          { sourceQuotationId: quotation._id },
+          { sourceQuotationId: updatedQuotation._id },
           { invoiceNo: commonNumber },
           // Backward-compat: older auto-created invoices used this subject format
-          { subject: `Invoice for ${quotation.quotationNo}` },
+          { subject: `Invoice for ${updatedQuotation.quotationNo}` },
           ...(referenceNo ? [{ referenceNo }] : [])
         ]
       });
@@ -162,8 +165,9 @@ exports.updateQuotation = async (req, res) => {
         const invoiceNo = commonNumber
 
         // Map quotation products to invoice products with all fields
-        const invoiceProducts = Array.isArray(quotation.products)
-          ? quotation.products
+        // Use updatedQuotation to ensure we have the latest data
+        const invoiceProducts = Array.isArray(updatedQuotation.products)
+          ? updatedQuotation.products
               .filter(p => (p && (p.product || '').trim()) !== '')
               .map(p => ({
                 product: p.product || '',
@@ -180,26 +184,26 @@ exports.updateQuotation = async (req, res) => {
         invoice = new Invoice({
           invoiceNo,
           referenceNo,
-          sourceQuotationId: quotation._id,
-          date: quotation.date || new Date(),
-          customer: quotation.customer,
-          customerId: quotation.customerId,
-          subject: quotation.subject || `Invoice for ${invoiceNo}`,
-          address: quotation.address,
-          email: quotation.email || 'duamedicalservice@gmail.com',
+          sourceQuotationId: updatedQuotation._id,
+          date: updatedQuotation.date || new Date(),
+          customer: updatedQuotation.customer,
+          customerId: updatedQuotation.customerId,
+          subject: updatedQuotation.subject || `Invoice for ${invoiceNo}`,
+          address: updatedQuotation.address,
+          email: updatedQuotation.email || 'duamedicalservice@gmail.com',
           products: invoiceProducts,
           // Copy all totals from quotation
-          subTotal: quotation.subTotal || 0,
-          totalAmount: quotation.totalAmount || 0,
+          subTotal: updatedQuotation.subTotal || 0,
+          totalAmount: updatedQuotation.totalAmount || 0,
           // Carry tax config forward
-          salesTaxEnabled: quotation.salesTaxEnabled || false,
-          salesTaxRate: quotation.salesTaxRate || 0,
-          salesTaxAmount: quotation.salesTaxAmount || 0,
-          fbrTaxEnabled: quotation.fbrTaxEnabled || false,
-          fbrTaxRate: quotation.fbrTaxRate || 0,
-          fbrTaxAmount: quotation.fbrTaxAmount || 0,
+          salesTaxEnabled: updatedQuotation.salesTaxEnabled || false,
+          salesTaxRate: updatedQuotation.salesTaxRate || 0,
+          salesTaxAmount: updatedQuotation.salesTaxAmount || 0,
+          fbrTaxEnabled: updatedQuotation.fbrTaxEnabled || false,
+          fbrTaxRate: updatedQuotation.fbrTaxRate || 0,
+          fbrTaxAmount: updatedQuotation.fbrTaxAmount || 0,
           status: 'Pending',
-          dueDate: quotation.validUntil, // already defaults to +30 days in model
+          dueDate: updatedQuotation.validUntil, // already defaults to +30 days in model
         });
 
         await invoice.save();
@@ -213,7 +217,7 @@ exports.updateQuotation = async (req, res) => {
       // ===== Delivery Challan (idempotent) =====
       let challan = await DeliveryChallan.findOne({
         $or: [
-          { sourceQuotationId: quotation._id },
+          { sourceQuotationId: updatedQuotation._id },
           { challanNo: commonNumber },
           ...(referenceNo ? [{ referenceNo }] : [])
         ]
@@ -224,8 +228,9 @@ exports.updateQuotation = async (req, res) => {
         const challanNo = commonNumber
 
         // Map quotation products to challan items with all fields
-        const challanItems = Array.isArray(quotation.products)
-          ? quotation.products
+        // Use updatedQuotation to ensure we have the latest data
+        const challanItems = Array.isArray(updatedQuotation.products)
+          ? updatedQuotation.products
               .filter(p => (p && (p.product || '').trim()) !== '')
               .map(p => ({
                 productName: p.product || '',
@@ -242,11 +247,11 @@ exports.updateQuotation = async (req, res) => {
         challan = new DeliveryChallan({
           challanNo,
           referenceNo,
-          sourceQuotationId: quotation._id,
-          date: quotation.date || new Date(),
-          customer: quotation.customer,
-          customerId: quotation.customerId,
-          address: quotation.address || '',
+          sourceQuotationId: updatedQuotation._id,
+          date: updatedQuotation.date || new Date(),
+          customer: updatedQuotation.customer,
+          customerId: updatedQuotation.customerId,
+          address: updatedQuotation.address || '',
           items: challanItems,
           status: 'Pending',
           vehicleNo: ''
@@ -261,18 +266,23 @@ exports.updateQuotation = async (req, res) => {
       }
 
       // Link back to quotation (best-effort)
-      quotation.linkedInvoiceId = invoice?._id || quotation.linkedInvoiceId
-      quotation.linkedDeliveryChallanId = challan?._id || quotation.linkedDeliveryChallanId
-      await quotation.save()
+      updatedQuotation.linkedInvoiceId = invoice?._id || updatedQuotation.linkedInvoiceId
+      updatedQuotation.linkedDeliveryChallanId = challan?._id || updatedQuotation.linkedDeliveryChallanId
+      await updatedQuotation.save()
       
-      console.log(`✅ Quotation ${quotation.quotationNo} accepted - Invoice and Delivery Challan auto-generated with same number`)
+      console.log(`✅ Quotation ${updatedQuotation.quotationNo} accepted - Invoice and Delivery Challan auto-generated with same number`)
+      console.log(`📦 Invoice products:`, invoiceProducts.length, 'items')
+      console.log(`📦 Delivery Challan items:`, challanItems.length, 'items')
     }
+    
+    // Use updatedQuotation for response to ensure latest data
+    const finalQuotation = updatedQuotation || quotation
     
     // Format response with id field
     res.json({
-      ...quotation.toObject(),
-      id: quotation._id.toString(),
-      products: quotation.products.map(prod => ({
+      ...finalQuotation.toObject(),
+      id: finalQuotation._id.toString(),
+      products: finalQuotation.products.map(prod => ({
         ...prod.toObject(),
         id: prod._id ? prod._id.toString() : prod.id
       }))
