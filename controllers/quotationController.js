@@ -161,6 +161,22 @@ exports.updateQuotation = async (req, res) => {
         // Use quotationNo as invoiceNo (same number)
         const invoiceNo = commonNumber
 
+        // Map quotation products to invoice products with all fields
+        const invoiceProducts = Array.isArray(quotation.products)
+          ? quotation.products
+              .filter(p => (p && (p.product || '').trim()) !== '')
+              .map(p => ({
+                product: p.product || '',
+                description: p.description || '',
+                buyDescription: p.buyDescription || '',
+                quantity: p.quantity || 0,
+                unitPrice: p.unitPrice || 0,
+                total: p.total || 0,
+                buyPrice: p.buyPrice || 0,
+                sellPrice: p.sellPrice || 0
+              }))
+          : [];
+
         invoice = new Invoice({
           invoiceNo,
           referenceNo,
@@ -171,12 +187,17 @@ exports.updateQuotation = async (req, res) => {
           subject: quotation.subject || `Invoice for ${invoiceNo}`,
           address: quotation.address,
           email: quotation.email || 'duamedicalservice@gmail.com',
-          products: quotation.products,
+          products: invoiceProducts,
+          // Copy all totals from quotation
+          subTotal: quotation.subTotal || 0,
+          totalAmount: quotation.totalAmount || 0,
           // Carry tax config forward
-          salesTaxEnabled: quotation.salesTaxEnabled,
-          salesTaxRate: quotation.salesTaxRate,
-          fbrTaxEnabled: quotation.fbrTaxEnabled,
-          fbrTaxRate: quotation.fbrTaxRate,
+          salesTaxEnabled: quotation.salesTaxEnabled || false,
+          salesTaxRate: quotation.salesTaxRate || 0,
+          salesTaxAmount: quotation.salesTaxAmount || 0,
+          fbrTaxEnabled: quotation.fbrTaxEnabled || false,
+          fbrTaxRate: quotation.fbrTaxRate || 0,
+          fbrTaxAmount: quotation.fbrTaxAmount || 0,
           status: 'Pending',
           dueDate: quotation.validUntil, // already defaults to +30 days in model
         });
@@ -202,13 +223,19 @@ exports.updateQuotation = async (req, res) => {
         // Use quotationNo as challanNo (same number)
         const challanNo = commonNumber
 
+        // Map quotation products to challan items with all fields
         const challanItems = Array.isArray(quotation.products)
           ? quotation.products
               .filter(p => (p && (p.product || '').trim()) !== '')
               .map(p => ({
-                productName: p.product,
+                productName: p.product || '',
                 description: p.description || '',
-                quantity: p.quantity || 0
+                buyDescription: p.buyDescription || '',
+                quantity: p.quantity || 0,
+                unitPrice: p.unitPrice || 0,
+                total: p.total || 0,
+                buyPrice: p.buyPrice || 0,
+                sellPrice: p.sellPrice || 0
               }))
           : [];
 

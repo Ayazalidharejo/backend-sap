@@ -5,9 +5,12 @@ const mongoose = require('mongoose');
 const productSchema = new mongoose.Schema({
   product:   { type: String, required: false },
   description: { type: String, required: false, trim: true },
+  buyDescription: { type: String, required: false, trim: true },
   quantity:  { type: Number, required: false, min: 0 },
   unitPrice: { type: Number, required: false, min: 0, default: 0 },
   total:     { type: Number, required: false, min: 0, default: 0 },
+  buyPrice: { type: Number, required: false, min: 0, default: 0 },
+  sellPrice: { type: Number, required: false, min: 0, default: 0 },
 }, { _id: true });
 
 // Invoice Schema
