@@ -189,7 +189,7 @@ exports.getAllInventory = async (req, res) => {
       ];
       
       // Add timeout to aggregate query to prevent hanging
-      const statsResult = await Inventory.aggregate(statsPipeline).maxTimeMS(30000);
+      const statsResult = await Inventory.aggregate(statsPipeline, { maxTimeMS: 30000 });
       const stats = statsResult[0] || {
         totalStockValue: 0,
         itemsInStockMachines: 0,
