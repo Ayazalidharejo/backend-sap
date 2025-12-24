@@ -48,10 +48,23 @@ const getNormalizedStatus = (item) => {
 // Get all inventory items (with optional status filter)
 exports.getAllInventory = async (req, res) => {
   try {
+    // Check MongoDB connection state
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ 
+        message: 'Database connection not ready. Please try again in a moment.',
+        error: 'MongoDB connection state: ' + mongoose.connection.readyState
+      });
+    }
+    
     const { status } = req.query;
     
     // Fetch all items (no status filter in query, we'll filter after normalizing)
-    const items = await Inventory.find({}).lean().sort({ createdAt: -1 });
+    // Add timeout to prevent hanging
+    const items = await Inventory.find({})
+      .lean()
+      .sort({ createdAt: -1 })
+      .maxTimeMS(30000); // 30 second timeout
     
     // Format items with normalized status field
     let formattedItems = items.map(item => {
@@ -184,7 +197,8 @@ exports.getAllInventory = async (req, res) => {
         }
       ];
       
-      const statsResult = await Inventory.aggregate(statsPipeline);
+      // Add timeout to aggregate query to prevent hanging
+      const statsResult = await Inventory.aggregate(statsPipeline).maxTimeMS(30000);
       const stats = statsResult[0] || {
         totalStockValue: 0,
         itemsInStockMachines: 0,
@@ -193,8 +207,8 @@ exports.getAllInventory = async (req, res) => {
         stockInParts: 0
       };
       
-      // Calculate all stats manually for accuracy
-      const allItems = await Inventory.find({}).lean();
+      // Calculate all stats manually for accuracy (use already fetched items instead of querying again)
+      const allItems = items; // Reuse items already fetched above
       
       let manualTotalStockValue = 0;
       let manualItemsInStockMachines = 0;
