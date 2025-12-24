@@ -48,15 +48,6 @@ const getNormalizedStatus = (item) => {
 // Get all inventory items (with optional status filter)
 exports.getAllInventory = async (req, res) => {
   try {
-    // Check MongoDB connection state
-    const mongoose = require('mongoose');
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({ 
-        message: 'Database connection not ready. Please try again in a moment.',
-        error: 'MongoDB connection state: ' + mongoose.connection.readyState
-      });
-    }
-    
     const { status } = req.query;
     
     // Fetch all items (no status filter in query, we'll filter after normalizing)
