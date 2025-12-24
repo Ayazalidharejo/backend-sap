@@ -51,6 +51,10 @@ const deliveryChallanSchema = new mongoose.Schema({
     type: String, 
     trim: true 
   },
+  subject: {
+    type: String,
+    trim: true
+  },
   items: [itemSchema],
   status: { 
     type: String, 

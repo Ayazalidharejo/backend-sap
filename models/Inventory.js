@@ -10,6 +10,7 @@ const inventorySchema = new mongoose.Schema({
   sN: { type: Number },
   pN: { type: String, trim: true }, // Product Number
   serialNo: { type: String, trim: true },
+  modelNo: { type: String, trim: true }, // Model Number
   boxNo: { type: String, trim: true },
   productName: { type: String, trim: true },
   partName: { type: String, trim: true },

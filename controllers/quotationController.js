@@ -252,6 +252,7 @@ exports.updateQuotation = async (req, res) => {
           customer: updatedQuotation.customer,
           customerId: updatedQuotation.customerId,
           address: updatedQuotation.address || '',
+          subject: updatedQuotation.subject || '', // Copy subject from quotation
           items: challanItems,
           status: 'Pending',
           vehicleNo: ''
