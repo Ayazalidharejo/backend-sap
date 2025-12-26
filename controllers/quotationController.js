@@ -276,6 +276,119 @@ exports.updateQuotation = async (req, res) => {
       console.log(`📦 Delivery Challan items:`, challanItems.length, 'items')
     }
     
+    // Update existing Invoice and Delivery Challan if quotation is already Accepted and is being updated
+    if (isNowAccepted && wasAccepted) {
+      // Use quotationNo as the common number for all three documents
+      const commonNumber = updatedQuotation.quotationNo || await generateSequentialId('QUO', Quotation, 'quotationNo')
+      const referenceNo = commonNumber.toUpperCase()
+      
+      // Set referenceNo to quotationNo if not already set
+      if (!updatedQuotation.referenceNo) {
+        updatedQuotation.referenceNo = referenceNo
+        await updatedQuotation.save()
+      }
+
+      // ===== Update Invoice =====
+      let invoice = await Invoice.findOne({
+        $or: [
+          { sourceQuotationId: updatedQuotation._id },
+          { invoiceNo: commonNumber },
+          { subject: `Invoice for ${updatedQuotation.quotationNo}` },
+          ...(referenceNo ? [{ referenceNo }] : []),
+          ...(updatedQuotation.linkedInvoiceId ? [{ _id: updatedQuotation.linkedInvoiceId }] : [])
+        ]
+      });
+
+      if (invoice) {
+        // Map quotation products to invoice products with all fields
+        const invoiceProducts = Array.isArray(updatedQuotation.products)
+          ? updatedQuotation.products
+              .filter(p => (p && (p.product || '').trim()) !== '')
+              .map(p => ({
+                product: p.product || '',
+                description: p.description || '',
+                buyDescription: p.buyDescription || '',
+                quantity: p.quantity || 0,
+                unitPrice: p.unitPrice || 0,
+                total: p.total || 0,
+                buyPrice: p.buyPrice || 0,
+                sellPrice: p.sellPrice || 0
+              }))
+          : [];
+
+        // Update invoice with latest quotation data
+        invoice.referenceNo = referenceNo
+        invoice.date = updatedQuotation.date || invoice.date
+        invoice.customer = updatedQuotation.customer || invoice.customer
+        invoice.customerId = updatedQuotation.customerId || invoice.customerId
+        invoice.subject = updatedQuotation.subject || invoice.subject || `Invoice for ${invoice.invoiceNo}`
+        invoice.address = updatedQuotation.address || invoice.address
+        invoice.email = updatedQuotation.email || invoice.email || 'duamedicalservice@gmail.com'
+        invoice.products = invoiceProducts
+        invoice.subTotal = updatedQuotation.subTotal || invoice.subTotal || 0
+        invoice.totalAmount = updatedQuotation.totalAmount || invoice.totalAmount || 0
+        invoice.salesTaxEnabled = updatedQuotation.salesTaxEnabled !== undefined ? updatedQuotation.salesTaxEnabled : invoice.salesTaxEnabled
+        invoice.salesTaxRate = updatedQuotation.salesTaxRate || invoice.salesTaxRate || 0
+        invoice.salesTaxAmount = updatedQuotation.salesTaxAmount || invoice.salesTaxAmount || 0
+        invoice.fbrTaxEnabled = updatedQuotation.fbrTaxEnabled !== undefined ? updatedQuotation.fbrTaxEnabled : invoice.fbrTaxEnabled
+        invoice.fbrTaxRate = updatedQuotation.fbrTaxRate || invoice.fbrTaxRate || 0
+        invoice.fbrTaxAmount = updatedQuotation.fbrTaxAmount || invoice.fbrTaxAmount || 0
+        invoice.dueDate = updatedQuotation.validUntil || invoice.dueDate
+
+        await invoice.save()
+        console.log(`✅ Updated Invoice with number: ${invoice.invoiceNo} from quotation ${updatedQuotation.quotationNo}`)
+      }
+
+      // ===== Update Delivery Challan =====
+      let challan = await DeliveryChallan.findOne({
+        $or: [
+          { sourceQuotationId: updatedQuotation._id },
+          { challanNo: commonNumber },
+          ...(referenceNo ? [{ referenceNo }] : []),
+          ...(updatedQuotation.linkedDeliveryChallanId ? [{ _id: updatedQuotation.linkedDeliveryChallanId }] : [])
+        ]
+      });
+
+      if (challan) {
+        // Map quotation products to challan items with all fields
+        const challanItems = Array.isArray(updatedQuotation.products)
+          ? updatedQuotation.products
+              .filter(p => (p && (p.product || '').trim()) !== '')
+              .map(p => ({
+                productName: p.product || '',
+                description: p.description || '',
+                buyDescription: p.buyDescription || '',
+                quantity: p.quantity || 0,
+                unitPrice: p.unitPrice || 0,
+                total: p.total || 0,
+                buyPrice: p.buyPrice || 0,
+                sellPrice: p.sellPrice || 0
+              }))
+          : [];
+
+        // Update challan with latest quotation data
+        challan.referenceNo = referenceNo
+        challan.date = updatedQuotation.date || challan.date
+        challan.customer = updatedQuotation.customer || challan.customer
+        challan.customerId = updatedQuotation.customerId || challan.customerId
+        challan.address = updatedQuotation.address || challan.address || ''
+        challan.subject = updatedQuotation.subject || challan.subject || ''
+        challan.items = challanItems
+
+        await challan.save()
+        console.log(`✅ Updated Delivery Challan with number: ${challan.challanNo} from quotation ${updatedQuotation.quotationNo}`)
+      }
+
+      // Ensure links are set
+      if (invoice) {
+        updatedQuotation.linkedInvoiceId = invoice._id
+      }
+      if (challan) {
+        updatedQuotation.linkedDeliveryChallanId = challan._id
+      }
+      await updatedQuotation.save()
+    }
+    
     // Use updatedQuotation for response to ensure latest data
     const finalQuotation = updatedQuotation || quotation
     

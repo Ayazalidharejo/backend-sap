@@ -43,13 +43,28 @@ exports.getDashboardStats = async (req, res) => {
           }
         }
       ]),
-      // Sales revenue aggregation
+      // Sales revenue aggregation - Calculate from sold items' prices (sum of product.total from all invoices)
+      // This ensures revenue is calculated from actual sold items, not just invoice totals
       Invoice.aggregate([
+        {
+          $unwind: { path: '$products', preserveNullAndEmptyArrays: true }
+        },
+        {
+          $group: {
+            _id: '$_id',
+            invoiceDate: { $first: '$date' },
+            // Sum of product.total for this invoice (sold items' prices)
+            productTotal: { $sum: { $ifNull: ['$products.total', 0] } },
+            invoiceTotalAmount: { $first: { $ifNull: ['$totalAmount', 0] } }
+          }
+        },
         {
           $group: {
             _id: null,
-            saleRevenue: { $sum: { $ifNull: ['$totalAmount', 0] } },
-            invoices: { $push: { date: '$date', totalAmount: '$totalAmount' } }
+            // Calculate total revenue from all sold items' prices across all invoices
+            saleRevenue: { $sum: '$productTotal' },
+            // Keep invoice data for chart (using invoice totalAmount which includes taxes)
+            invoices: { $push: { date: '$invoiceDate', totalAmount: '$invoiceTotalAmount' } }
           }
         }
       ]),
