@@ -7,7 +7,7 @@ const Customer = require('../models/Customer');
 exports.getDashboardStats = async (req, res) => {
   try {
     // Use parallel queries and aggregation for better performance
-    const [expensesAgg, inventoryAgg, invoicesAgg, incomeAgg] = await Promise.all([
+    const [expensesAgg, inventoryAgg, revenueAgg, invoicesAgg, incomeAgg] = await Promise.all([
       // Total expenses aggregation
       Accounting.aggregate([
         { $match: { category: 'Expense' } },
@@ -43,28 +43,44 @@ exports.getDashboardStats = async (req, res) => {
           }
         }
       ]),
-      // Sales revenue aggregation - Calculate from sold items' prices (sum of product.total from all invoices)
-      // This ensures revenue is calculated from actual sold items, not just invoice totals
-      Invoice.aggregate([
+      // Sales revenue aggregation - Calculate from sold inventory items (matching Reports page)
+      // Use lastSoldTotal if available, otherwise calculate from lastSoldUnitPrice * lastSoldQuantity
+      Inventory.aggregate([
         {
-          $unwind: { path: '$products', preserveNullAndEmptyArrays: true }
-        },
-        {
-          $group: {
-            _id: '$_id',
-            invoiceDate: { $first: '$date' },
-            // Sum of product.total for this invoice (sold items' prices)
-            productTotal: { $sum: { $ifNull: ['$products.total', 0] } },
-            invoiceTotalAmount: { $first: { $ifNull: ['$totalAmount', 0] } }
-          }
+          $match: { isSoldEntry: true }
         },
         {
           $group: {
             _id: null,
-            // Calculate total revenue from all sold items' prices across all invoices
-            saleRevenue: { $sum: '$productTotal' },
-            // Keep invoice data for chart (using invoice totalAmount which includes taxes)
-            invoices: { $push: { date: '$invoiceDate', totalAmount: '$invoiceTotalAmount' } }
+            // Calculate revenue from sold items - use lastSoldTotal if available, otherwise calculate
+            saleRevenue: {
+              $sum: {
+                $cond: [
+                  { $gt: [{ $ifNull: ['$lastSoldTotal', 0] }, 0] },
+                  { $ifNull: ['$lastSoldTotal', 0] },
+                  {
+                    $multiply: [
+                      { $ifNull: ['$lastSoldUnitPrice', { $ifNull: ['$price', 0] }] },
+                      { $ifNull: ['$lastSoldQuantity', { $ifNull: ['$quantity', 1] }] }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]),
+      // Invoice aggregation for chart data (using invoice totalAmount which includes taxes)
+      Invoice.aggregate([
+        {
+          $group: {
+            _id: null,
+            invoices: {
+              $push: {
+                date: '$date',
+                totalAmount: { $ifNull: ['$totalAmount', 0] }
+              }
+            }
           }
         }
       ]),
@@ -83,7 +99,9 @@ exports.getDashboardStats = async (req, res) => {
       parts: 0,
       soldItems: 0
     };
-    const saleRevenue = invoicesAgg[0]?.saleRevenue || 0;
+    // Revenue is now calculated from sold inventory items (matching Reports page)
+    const saleRevenue = revenueAgg[0]?.saleRevenue || 0;
+    // Get invoices for chart data
     const invoices = invoicesAgg[0]?.invoices || [];
     const totalIncome = incomeAgg[0]?.totalIncome || 0;
     

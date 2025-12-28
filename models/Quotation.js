@@ -89,6 +89,11 @@ const quotationSchema = new mongoose.Schema({
     type: [String],
     default: ['PAYMENT: 30% IN ADVANCE', 'VALIDITY: 45 DAYS']
   },
+  buybackDescription: {
+    type: String,
+    required: false,
+    trim: true
+  },
   // Links created when quotation is Accepted
   linkedInvoiceId: {
     type: mongoose.Schema.Types.ObjectId,
