@@ -50,6 +50,26 @@ exports.getDashboardStats = async (req, res) => {
           $match: { isSoldEntry: true }
         },
         {
+          $addFields: {
+            // Calculate unit price: prefer lastSoldUnitPrice, fallback to price
+            calcUnitPrice: {
+              $cond: [
+                { $gt: [{ $ifNull: ['$lastSoldUnitPrice', 0] }, 0] },
+                { $ifNull: ['$lastSoldUnitPrice', 0] },
+                { $ifNull: ['$price', 0] }
+              ]
+            },
+            // Calculate quantity: prefer lastSoldQuantity, fallback to quantity or 1
+            calcQuantity: {
+              $cond: [
+                { $gt: [{ $ifNull: ['$lastSoldQuantity', 0] }, 0] },
+                { $ifNull: ['$lastSoldQuantity', 0] },
+                { $ifNull: ['$quantity', 1] }
+              ]
+            }
+          }
+        },
+        {
           $group: {
             _id: null,
             // Calculate revenue from sold items - use lastSoldTotal if available, otherwise calculate
@@ -58,12 +78,7 @@ exports.getDashboardStats = async (req, res) => {
                 $cond: [
                   { $gt: [{ $ifNull: ['$lastSoldTotal', 0] }, 0] },
                   { $ifNull: ['$lastSoldTotal', 0] },
-                  {
-                    $multiply: [
-                      { $ifNull: ['$lastSoldUnitPrice', { $ifNull: ['$price', 0] }] },
-                      { $ifNull: ['$lastSoldQuantity', { $ifNull: ['$quantity', 1] }] }
-                    ]
-                  }
+                  { $multiply: ['$calcUnitPrice', '$calcQuantity'] }
                 ]
               }
             }
