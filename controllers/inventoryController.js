@@ -59,18 +59,30 @@ exports.getAllInventory = async (req, res) => {
     
     // Format items with normalized status field
     let formattedItems = items.map(item => {
-      const originalCategory = item.category // Preserve: 'machines', 'probs', 'parts', 'productsCategory', 'importStock'
-      const normalizedStatus = getNormalizedStatus(item);
-      
-      return {
-        ...item,
-        id: item._id.toString(),
-        itemType: originalCategory, // Keep original category as itemType
-        status: normalizedStatus, // Always set normalized status
-        // For machines: category becomes machineCategory value (instock/repair/sold) for display
-        // For importStock: category becomes categoryName for display
-        category: originalCategory === 'machines' ? (item.machineCategory || 'instock') : 
-                  (originalCategory === 'importStock' && item.categoryName ? item.categoryName : originalCategory)
+      try {
+        // Ensure _id exists
+        if (!item._id) {
+          console.error('Item missing _id:', item);
+          throw new Error('Item missing _id field');
+        }
+        
+        const originalCategory = item.category // Preserve: 'machines', 'probs', 'parts', 'productsCategory', 'importStock'
+        const normalizedStatus = getNormalizedStatus(item);
+        
+        return {
+          ...item,
+          id: item._id.toString(),
+          itemType: originalCategory, // Keep original category as itemType
+          status: normalizedStatus, // Always set normalized status
+          // For machines: category becomes machineCategory value (instock/repair/sold) for display
+          // For importStock: category becomes categoryName for display
+          category: originalCategory === 'machines' ? (item.machineCategory || 'instock') : 
+                    (originalCategory === 'importStock' && item.categoryName ? item.categoryName : originalCategory)
+        }
+      } catch (itemError) {
+        console.error('Error formatting item:', itemError);
+        console.error('Problematic item:', JSON.stringify(item, null, 2));
+        throw itemError;
       }
     });
     
@@ -189,7 +201,7 @@ exports.getAllInventory = async (req, res) => {
       ];
       
       // Add timeout to aggregate query to prevent hanging
-      const statsResult = await Inventory.aggregate(statsPipeline, { maxTimeMS: 30000 });
+      const statsResult = await Inventory.aggregate(statsPipeline);
       const stats = statsResult[0] || {
         totalStockValue: 0,
         itemsInStockMachines: 0,
@@ -335,7 +347,12 @@ exports.getAllInventory = async (req, res) => {
     
     res.json(formattedItems);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error in getAllInventory:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      message: error.message,
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
