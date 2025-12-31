@@ -50,12 +50,9 @@ exports.getAllInventory = async (req, res) => {
   try {
     const { status } = req.query;
     
-    // Fetch all items (no status filter in query, we'll filter after normalizing)
-    // Add timeout to prevent hanging
     const items = await Inventory.find({})
       .lean()
       .sort({ createdAt: -1 })
-      .maxTimeMS(30000); // 30 second timeout
     
     // Format items with normalized status field
     let formattedItems = items.map(item => {
@@ -200,7 +197,6 @@ exports.getAllInventory = async (req, res) => {
         }
       ];
       
-      // Add timeout to aggregate query to prevent hanging
       const statsResult = await Inventory.aggregate(statsPipeline);
       const stats = statsResult[0] || {
         totalStockValue: 0,
@@ -348,10 +344,8 @@ exports.getAllInventory = async (req, res) => {
     res.json(formattedItems);
   } catch (error) {
     console.error('Error in getAllInventory:', error);
-    console.error('Error stack:', error.stack);
     res.status(500).json({ 
-      message: error.message,
-      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      message: error.message || 'Failed to fetch inventory items'
     });
   }
 };
