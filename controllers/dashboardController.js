@@ -7,7 +7,7 @@ const Customer = require('../models/Customer');
 exports.getDashboardStats = async (req, res) => {
   try {
     // Use parallel queries and aggregation for better performance
-    const [expensesAgg, inventoryAgg, revenueAgg, invoicesAgg, incomeAgg] = await Promise.all([
+    const [expensesAgg, inventoryAgg, revenueAgg, invoicesAgg, incomeAgg, soldQuantityAgg] = await Promise.all([
       // Total expenses aggregation
       Accounting.aggregate([
         { $match: { category: 'Expense' } },
@@ -103,6 +103,58 @@ exports.getDashboardStats = async (req, res) => {
       Accounting.aggregate([
         { $match: { category: 'Income' } },
         { $group: { _id: null, totalIncome: { $sum: { $ifNull: ['$credit', 0] } } } }
+      ]),
+      // Calculate total sold quantity - match ReportsPage exactly (sum of all quantities from isSoldEntry=true items)
+      // ReportsPage logic: typeof item.lastSoldQuantity === 'number' && item.lastSoldQuantity > 0 ? item.lastSoldQuantity : item.quantity || 1
+      // Note: ReportsPage does deduplication, but for dashboard we sum all items to match the total quantity shown
+      Inventory.aggregate([
+        {
+          $match: { isSoldEntry: true }
+        },
+        {
+          $addFields: {
+            // Calculate quantity: match ReportsPage logic exactly
+            // In ReportsPage: typeof item.lastSoldQuantity === 'number' && item.lastSoldQuantity > 0
+            // In MongoDB: Check if lastSoldQuantity is numeric and > 0
+            calcQuantity: {
+              $cond: [
+                {
+                  $and: [
+                    // Check if lastSoldQuantity exists (not null, not missing)
+                    { $ne: [{ $ifNull: ['$lastSoldQuantity', null] }, null] },
+                    // Check if it's a numeric type (int, long, double, decimal, number)
+                    { $in: [
+                      { $type: '$lastSoldQuantity' },
+                      ['int', 'long', 'double', 'decimal', 'number']
+                    ]},
+                    // Check if lastSoldQuantity > 0
+                    { $gt: ['$lastSoldQuantity', 0] }
+                  ]
+                },
+                '$lastSoldQuantity',
+                // Fallback: quantity or 1 (same as ReportsPage: item.quantity || 1)
+                {
+                  $cond: [
+                    { $and: [
+                      { $ne: [{ $ifNull: ['$quantity', null] }, null] },
+                      { $gt: [{ $ifNull: ['$quantity', 0] }, 0] }
+                    ]},
+                    { $ifNull: ['$quantity', 1] },
+                    1
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            soldItemsCount: {
+              $sum: '$calcQuantity'  // Sum of all quantities, matching ReportsPage total quantity
+            }
+          }
+        }
       ])
     ]);
     
@@ -119,6 +171,8 @@ exports.getDashboardStats = async (req, res) => {
     // Get invoices for chart data
     const invoices = invoicesAgg[0]?.invoices || [];
     const totalIncome = incomeAgg[0]?.totalIncome || 0;
+    // Get sold items count (number of sold item entries with isSoldEntry=true)
+    const soldItemsCount = soldQuantityAgg[0]?.soldItemsCount || 0;
     
     const dashboardStats = {
       totalExpenses,
@@ -127,7 +181,7 @@ exports.getDashboardStats = async (req, res) => {
       machine: inventoryStats.machine,
       parts: inventoryStats.parts,
       saleRevenue,
-      soldItems: inventoryStats.soldItems,
+      soldItems: soldItemsCount, // Use count of sold items (isSoldEntry=true)
     };
     
     // Generate sale revenue chart data (last 12 months) - optimized
