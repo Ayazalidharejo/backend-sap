@@ -89,6 +89,11 @@ const invoiceSchema = new mongoose.Schema({
   dueDate: { 
     type: Date 
   },
+  buybackDescription: {
+    type: String,
+    required: false,
+    trim: true
+  },
 }, { 
   timestamps: true 
 });
@@ -106,6 +111,16 @@ invoiceSchema.pre('save', function(next) {
     this.referenceNo = this.invoiceNo
   }
   
+  // If invoice is created from quotation, preserve ALL totals from quotation (don't recalculate)
+  // This ensures the invoice matches the quotation exactly
+  if (this.sourceQuotationId && this.totalAmount !== undefined && this.totalAmount !== null) {
+    // Preserve all totals from quotation - don't recalculate anything
+    // subTotal, salesTaxAmount, fbrTaxAmount, and totalAmount are already set from quotation
+    next();
+    return;
+  }
+  
+  // For invoices NOT from quotation, calculate totals normally
   if (this.products && this.products.length > 0) {
     this.subTotal = this.products.reduce((sum, product) => {
       return sum + (product.total || 0);
@@ -120,8 +135,8 @@ invoiceSchema.pre('save', function(next) {
 
   this.salesTaxAmount = salesRate > 0 ? (subTotal * salesRate) / 100 : 0
   this.fbrTaxAmount = fbrRate > 0 ? (subTotal * fbrRate) / 100 : 0
-
   this.totalAmount = subTotal + (this.salesTaxAmount || 0) + (this.fbrTaxAmount || 0)
+  
   next();
 });
 

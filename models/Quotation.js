@@ -135,13 +135,29 @@ quotationSchema.pre('save', function(next) {
   }
 
   const subTotal = this.subTotal || 0
+  
+  // Calculate buyback amount from products
+  const totalBuyback = (this.products || []).reduce((sum, product) => {
+    return sum + (parseFloat(product.buyPrice) || 0);
+  }, 0);
+  
+  // Amount after buyback
+  const afterBuyback = subTotal - totalBuyback;
+  
   const salesRate = this.salesTaxEnabled ? (this.salesTaxRate || 0) : 0
   const fbrRate = this.fbrTaxEnabled ? (this.fbrTaxRate || 0) : 0
 
-  this.salesTaxAmount = salesRate > 0 ? (subTotal * salesRate) / 100 : 0
-  this.fbrTaxAmount = fbrRate > 0 ? (subTotal * fbrRate) / 100 : 0
+  // Calculate taxes on amount AFTER buyback (matching frontend calculation)
+  this.salesTaxAmount = salesRate > 0 ? Math.round((afterBuyback * salesRate) / 100) : 0
+  this.fbrTaxAmount = fbrRate > 0 ? Math.round((afterBuyback * fbrRate) / 100) : 0
 
-  this.totalAmount = subTotal + (this.salesTaxAmount || 0) + (this.fbrTaxAmount || 0)
+  // Only calculate totalAmount if not already provided (frontend sends it)
+  // Taxes are SUBTRACTED from afterBuyback (not added), matching frontend calcTotals
+  if (this.totalAmount === null || this.totalAmount === undefined || this.totalAmount === 0) {
+    this.totalAmount = Math.max(0, afterBuyback - this.salesTaxAmount - this.fbrTaxAmount)
+  }
+  // Otherwise, use the value sent from frontend (it's already calculated correctly)
+  
   next();
 });
 

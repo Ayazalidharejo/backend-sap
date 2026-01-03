@@ -97,11 +97,181 @@ exports.createQuotation = async (req, res) => {
     
     await quotation.save();
     
+    // Reload quotation to ensure we have the latest data including all product fields
+    const savedQuotation = await Quotation.findById(quotation._id);
+    
+    // Auto-generate Invoice + Delivery Challan if status is "Accepted"
+    // Use case-insensitive comparison to handle any case variations
+    const isAccepted = savedQuotation.status && savedQuotation.status.toString().toUpperCase() === 'ACCEPTED';
+    
+    console.log('📋 Quotation Create - Status Check:', {
+      quotationId: savedQuotation._id,
+      status: savedQuotation.status,
+      statusType: typeof savedQuotation.status,
+      isAccepted,
+      willCreateInvoice: isAccepted
+    });
+    
+    if (isAccepted) {
+      try {
+        console.log('✅ Creating quotation with Accepted status - Starting invoice creation...');
+        // Use quotationNo as the common number for all three documents
+        const commonNumber = savedQuotation.quotationNo || quotationNo;
+        const referenceNo = commonNumber.toUpperCase();
+        
+        // Set referenceNo to quotationNo if not already set
+        if (!savedQuotation.referenceNo) {
+          savedQuotation.referenceNo = referenceNo;
+          await savedQuotation.save();
+        }
+
+        // ===== Invoice (idempotent) =====
+        // Map quotation products to invoice products with all fields
+        const invoiceProducts = Array.isArray(savedQuotation.products)
+          ? savedQuotation.products
+              .filter(p => (p && (p.product || '').trim()) !== '')
+              .map(p => ({
+                product: p.product || '',
+                description: p.description || '',
+                buyDescription: p.buyDescription || '',
+                quantity: p.quantity || 0,
+                unitPrice: p.unitPrice || 0,
+                total: p.total || 0,
+                buyPrice: p.buyPrice || 0,
+                sellPrice: p.sellPrice || 0
+              }))
+          : [];
+
+        console.log('📦 Invoice products to create:', invoiceProducts.length, 'products');
+        console.log('📦 Invoice products data:', JSON.stringify(invoiceProducts, null, 2));
+
+        let invoice = await Invoice.findOne({
+          $or: [
+            { sourceQuotationId: savedQuotation._id },
+            { invoiceNo: commonNumber },
+            { subject: `Invoice for ${savedQuotation.quotationNo}` },
+            ...(referenceNo ? [{ referenceNo }] : [])
+          ]
+        });
+
+        if (!invoice) {
+          console.log('📄 Creating new invoice for quotation:', savedQuotation.quotationNo);
+          const invoiceNo = commonNumber;
+
+          invoice = new Invoice({
+            invoiceNo,
+            referenceNo,
+            sourceQuotationId: savedQuotation._id,
+            date: savedQuotation.date || new Date(),
+            customer: savedQuotation.customer,
+            customerId: savedQuotation.customerId,
+            subject: savedQuotation.subject || `Invoice for ${invoiceNo}`,
+            address: savedQuotation.address,
+            email: savedQuotation.email || 'duamedicalservice@gmail.com',
+            products: invoiceProducts,
+            // Copy all totals from quotation
+            subTotal: savedQuotation.subTotal || 0,
+            totalAmount: savedQuotation.totalAmount || 0,
+            // Carry tax config forward
+            salesTaxEnabled: savedQuotation.salesTaxEnabled || false,
+            salesTaxRate: savedQuotation.salesTaxRate || 0,
+            salesTaxAmount: savedQuotation.salesTaxAmount || 0,
+            fbrTaxEnabled: savedQuotation.fbrTaxEnabled || false,
+            fbrTaxRate: savedQuotation.fbrTaxRate || 0,
+            fbrTaxAmount: savedQuotation.fbrTaxAmount || 0,
+            status: 'Pending',
+            dueDate: savedQuotation.validUntil,
+            buybackDescription: savedQuotation.buybackDescription || '',
+          });
+
+          await invoice.save();
+          console.log(`✅ Auto-generated Invoice with number: ${invoiceNo}`);
+        } else {
+          console.log(`⚠️ Invoice already exists for quotation ${savedQuotation.quotationNo}, skipping creation`);
+          if (!invoice.referenceNo && referenceNo) {
+            invoice.referenceNo = referenceNo;
+            await invoice.save();
+          }
+        }
+
+        // ===== Delivery Challan (idempotent) =====
+        const challanItems = Array.isArray(savedQuotation.products)
+          ? savedQuotation.products
+              .filter(p => (p && (p.product || '').trim()) !== '')
+              .map(p => ({
+                productName: p.product || '',
+                description: p.description || '',
+                buyDescription: p.buyDescription || '',
+                quantity: p.quantity || 0,
+                unitPrice: p.unitPrice || 0,
+                total: p.total || 0,
+                buyPrice: p.buyPrice || 0,
+                sellPrice: p.sellPrice || 0
+              }))
+          : [];
+
+        let challan = await DeliveryChallan.findOne({
+          $or: [
+            { sourceQuotationId: savedQuotation._id },
+            { challanNo: commonNumber },
+            ...(referenceNo ? [{ referenceNo }] : [])
+          ]
+        });
+
+        if (!challan) {
+          const challanNo = commonNumber;
+
+          challan = new DeliveryChallan({
+            challanNo,
+            referenceNo,
+            sourceQuotationId: savedQuotation._id,
+            date: savedQuotation.date || new Date(),
+            customer: savedQuotation.customer,
+            customerId: savedQuotation.customerId,
+            address: savedQuotation.address || '',
+            subject: savedQuotation.subject || '',
+            items: challanItems,
+            status: 'Pending',
+            vehicleNo: ''
+          });
+
+          await challan.save();
+          console.log(`✅ Auto-generated Delivery Challan with number: ${challanNo}`);
+        } else {
+          console.log(`⚠️ Delivery Challan already exists for quotation ${savedQuotation.quotationNo}, skipping creation`);
+          if (!challan.referenceNo && referenceNo) {
+            challan.referenceNo = referenceNo;
+            await challan.save();
+          }
+        }
+
+        // Link back to quotation
+        savedQuotation.linkedInvoiceId = invoice?._id || savedQuotation.linkedInvoiceId;
+        savedQuotation.linkedDeliveryChallanId = challan?._id || savedQuotation.linkedDeliveryChallanId;
+        await savedQuotation.save();
+        
+        console.log(`✅ Quotation ${savedQuotation.quotationNo} created with Accepted status - Invoice and Delivery Challan auto-generated with same number`);
+        console.log(`📦 Invoice products:`, invoiceProducts.length, 'items');
+        console.log(`📦 Delivery Challan items:`, challanItems.length, 'items');
+      } catch (invoiceError) {
+        console.error('❌ Error auto-generating invoice/delivery challan:', invoiceError);
+        console.error('Error details:', {
+          message: invoiceError.message,
+          stack: invoiceError.stack,
+          quotationId: savedQuotation._id,
+          quotationNo: savedQuotation.quotationNo
+        });
+        // Don't fail the quotation creation if invoice generation fails
+        // Just log the error and continue
+      }
+    }
+    
     // Format response with id field
+    const finalQuotation = await Quotation.findById(quotation._id);
     res.status(201).json({
-      ...quotation.toObject(),
-      id: quotation._id.toString(),
-      products: quotation.products.map(prod => ({
+      ...finalQuotation.toObject(),
+      id: finalQuotation._id.toString(),
+      products: finalQuotation.products.map(prod => ({
         ...prod.toObject(),
         id: prod._id ? prod._id.toString() : prod.id
       }))
@@ -123,8 +293,18 @@ exports.updateQuotation = async (req, res) => {
       return res.status(404).json({ message: 'Quotation not found' });
     }
     
-    const wasAccepted = quotation.status === 'Accepted';
-    const isNowAccepted = req.body.status === 'Accepted';
+    // Use case-insensitive comparison to handle any case variations
+    const wasAccepted = quotation.status && quotation.status.toString().toUpperCase() === 'ACCEPTED';
+    const isNowAccepted = req.body.status && req.body.status.toString().toUpperCase() === 'ACCEPTED';
+    
+    console.log('📋 Quotation Update - Status Check:', {
+      quotationId: quotation._id,
+      oldStatus: quotation.status,
+      newStatus: req.body.status,
+      wasAccepted,
+      isNowAccepted,
+      willCreateInvoice: isNowAccepted && !wasAccepted
+    });
     
     // Update quotation
     Object.assign(quotation, {
@@ -139,6 +319,7 @@ exports.updateQuotation = async (req, res) => {
     // Auto-generate Invoice + Delivery Challan if status changed to "Accepted"
     // All three will share the same number (quotationNo) so they match.
     if (isNowAccepted && !wasAccepted) {
+      console.log('✅ Status changed to Accepted - Starting invoice creation...');
       // Use quotationNo as the common number for all three documents
       const commonNumber = updatedQuotation.quotationNo || await generateSequentialId('QUO', Quotation, 'quotationNo')
       const referenceNo = commonNumber.toUpperCase()
@@ -150,6 +331,22 @@ exports.updateQuotation = async (req, res) => {
       }
 
       // ===== Invoice (idempotent) =====
+      // Map quotation products to invoice products with all fields (declare outside if block)
+      const invoiceProducts = Array.isArray(updatedQuotation.products)
+        ? updatedQuotation.products
+            .filter(p => (p && (p.product || '').trim()) !== '')
+            .map(p => ({
+              product: p.product || '',
+              description: p.description || '',
+              buyDescription: p.buyDescription || '',
+              quantity: p.quantity || 0,
+              unitPrice: p.unitPrice || 0,
+              total: p.total || 0,
+              buyPrice: p.buyPrice || 0,
+              sellPrice: p.sellPrice || 0
+            }))
+        : [];
+
       let invoice = await Invoice.findOne({
         $or: [
           { sourceQuotationId: updatedQuotation._id },
@@ -161,25 +358,11 @@ exports.updateQuotation = async (req, res) => {
       });
 
       if (!invoice) {
+        console.log('📄 Creating new invoice for quotation:', updatedQuotation.quotationNo);
         // Use quotationNo as invoiceNo (same number)
         const invoiceNo = commonNumber
 
-        // Map quotation products to invoice products with all fields
-        // Use updatedQuotation to ensure we have the latest data
-        const invoiceProducts = Array.isArray(updatedQuotation.products)
-          ? updatedQuotation.products
-              .filter(p => (p && (p.product || '').trim()) !== '')
-              .map(p => ({
-                product: p.product || '',
-                description: p.description || '',
-                buyDescription: p.buyDescription || '',
-                quantity: p.quantity || 0,
-                unitPrice: p.unitPrice || 0,
-                total: p.total || 0,
-                buyPrice: p.buyPrice || 0,
-                sellPrice: p.sellPrice || 0
-              }))
-          : [];
+        console.log('📦 Invoice products:', invoiceProducts.length, 'products');
 
         invoice = new Invoice({
           invoiceNo,
@@ -204,6 +387,7 @@ exports.updateQuotation = async (req, res) => {
           fbrTaxAmount: updatedQuotation.fbrTaxAmount || 0,
           status: 'Pending',
           dueDate: updatedQuotation.validUntil, // already defaults to +30 days in model
+          buybackDescription: updatedQuotation.buybackDescription || '',
         });
 
         await invoice.save();
@@ -215,6 +399,22 @@ exports.updateQuotation = async (req, res) => {
       }
 
       // ===== Delivery Challan (idempotent) =====
+      // Map quotation products to challan items with all fields (declare outside if block)
+      const challanItems = Array.isArray(updatedQuotation.products)
+        ? updatedQuotation.products
+            .filter(p => (p && (p.product || '').trim()) !== '')
+            .map(p => ({
+              productName: p.product || '',
+              description: p.description || '',
+              buyDescription: p.buyDescription || '',
+              quantity: p.quantity || 0,
+              unitPrice: p.unitPrice || 0,
+              total: p.total || 0,
+              buyPrice: p.buyPrice || 0,
+              sellPrice: p.sellPrice || 0
+            }))
+        : [];
+
       let challan = await DeliveryChallan.findOne({
         $or: [
           { sourceQuotationId: updatedQuotation._id },
@@ -226,23 +426,6 @@ exports.updateQuotation = async (req, res) => {
       if (!challan) {
         // Use quotationNo as challanNo (same number)
         const challanNo = commonNumber
-
-        // Map quotation products to challan items with all fields
-        // Use updatedQuotation to ensure we have the latest data
-        const challanItems = Array.isArray(updatedQuotation.products)
-          ? updatedQuotation.products
-              .filter(p => (p && (p.product || '').trim()) !== '')
-              .map(p => ({
-                productName: p.product || '',
-                description: p.description || '',
-                buyDescription: p.buyDescription || '',
-                quantity: p.quantity || 0,
-                unitPrice: p.unitPrice || 0,
-                total: p.total || 0,
-                buyPrice: p.buyPrice || 0,
-                sellPrice: p.sellPrice || 0
-              }))
-          : [];
 
         challan = new DeliveryChallan({
           challanNo,
@@ -334,6 +517,7 @@ exports.updateQuotation = async (req, res) => {
         invoice.fbrTaxRate = updatedQuotation.fbrTaxRate || invoice.fbrTaxRate || 0
         invoice.fbrTaxAmount = updatedQuotation.fbrTaxAmount || invoice.fbrTaxAmount || 0
         invoice.dueDate = updatedQuotation.validUntil || invoice.dueDate
+        invoice.buybackDescription = updatedQuotation.buybackDescription || invoice.buybackDescription || ''
 
         await invoice.save()
         console.log(`✅ Updated Invoice with number: ${invoice.invoiceNo} from quotation ${updatedQuotation.quotationNo}`)

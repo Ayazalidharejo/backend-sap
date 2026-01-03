@@ -44,7 +44,7 @@ const agentSchema = new mongoose.Schema({
   },
   permissions: [{ 
     type: String,
-    enum: ['dashboard', 'inventory', 'customers', 'invoices', 'quotations', 'accounting', 'delivery', 'reports', 'agents']
+    enum: ['dashboard', 'inventory', 'customers', 'invoices', 'quotations', 'delivery-challan', 'accounting', 'profit-loss', 'reports', 'agents']
   }],
 }, { 
   timestamps: true 

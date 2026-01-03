@@ -50,23 +50,6 @@ exports.getAllInventory = async (req, res) => {
   try {
     const { status } = req.query;
     
-    // Check if database is connected
-    const mongoose = require('mongoose');
-    if (mongoose.connection.readyState !== 1) {
-      console.error('❌ Database not connected. ReadyState:', mongoose.connection.readyState);
-      return res.status(503).json({ 
-        message: 'Database not connected',
-        items: [],
-        stats: {
-          totalStockValue: 0,
-          itemsInStockMachines: 0,
-          itemsSold: 0,
-          stockInProbes: 0,
-          stockInParts: 0
-        }
-      });
-    }
-    
     const items = await Inventory.find({})
       .lean()
       .sort({ createdAt: -1 })
@@ -358,26 +341,9 @@ exports.getAllInventory = async (req, res) => {
       });
     }
     
-    // If includeStats is false, return just items array
     res.json(formattedItems);
   } catch (error) {
     console.error('Error in getAllInventory:', error);
-    
-    // If includeStats was requested, return structure with empty items/stats
-    if (req.query.includeStats === 'true') {
-      return res.status(500).json({ 
-        message: error.message || 'Failed to fetch inventory items',
-        items: [],
-        stats: {
-          totalStockValue: 0,
-          itemsInStockMachines: 0,
-          itemsSold: 0,
-          stockInProbes: 0,
-          stockInParts: 0
-        }
-      });
-    }
-    
     res.status(500).json({ 
       message: error.message || 'Failed to fetch inventory items'
     });
