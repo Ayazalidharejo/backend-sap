@@ -11,20 +11,24 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: ONE_HOUR_MS, // Wait up to 1 hour for server selection
       socketTimeoutMS: ONE_HOUR_MS, // Wait up to 1 hour for socket operations
       connectTimeoutMS: ONE_HOUR_MS, // Wait up to 1 hour for initial connection
-      bufferMaxEntries: 0, // Disable mongoose buffering
-      bufferCommands: false, // Disable mongoose buffering
+      // Keep buffering enabled (default) to allow queries before connection is ready
+      // Mongoose will queue commands until connection is established
+      // No need to set bufferMaxEntries or bufferCommands - use defaults (unlimited buffering)
       maxPoolSize: 10, // Maintain up to 10 socket connections
       minPoolSize: 5, // Maintain at least 5 socket connections
     };
     
+    // Connect to MongoDB
     await mongoose.connect(mongoURI, options);
     console.log('✅ MongoDB Connected');
     
-    // Set global mongoose options to disable buffering timeout
-    mongoose.set('bufferCommands', false);
-    mongoose.set('bufferMaxEntries', 0);
+    // Verify connection is ready
+    if (mongoose.connection.readyState === 1) {
+      console.log('✅ MongoDB Connection Ready - Ready to accept queries');
+    }
   } catch (error) {
     console.error('❌ MongoDB Connection Error:', error.message);
+    // Don't throw - let the app continue, Mongoose will buffer commands
   }
 };
 
