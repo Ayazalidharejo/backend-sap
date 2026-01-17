@@ -19,6 +19,7 @@ const inventorySchema = new mongoose.Schema({
   description: { type: String, trim: true },
   quantity: { type: Number, default: 0, min: 0 },
   price: { type: Number, min: 0 },
+  sellPrice: { type: Number, min: 0 }, // Sell price for importStock (not shown on customer page, shown in Profit/Loss)
   categoryName: { type: String, trim: true, default: 'Default' }, // For custom categories
   
   // For machines only
