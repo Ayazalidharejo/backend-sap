@@ -9,7 +9,7 @@ const app = express();
 // Connect to MongoDB
 connectDB();
 
-// Middleware
+
 // CORS Configuration - Allow multiple origins for development and production
 const allowedOrigins = [
   'http://localhost:5173',  // Vite dev server
