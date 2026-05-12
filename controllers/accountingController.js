@@ -1,5 +1,49 @@
 const Accounting = require('../models/Accounting');
 
+async function recalcBalancesFromDate(fromDate) {
+  const from = fromDate ? new Date(fromDate) : null;
+
+  // Determine starting balance from the last entry strictly before `from`
+  let startingBalance = 0;
+  if (from) {
+    const prev = await Accounting.findOne({ date: { $lt: from } })
+      .select({ balance: 1 })
+      .sort({ date: -1, _id: -1 })
+      .lean();
+    startingBalance = prev?.balance || 0;
+  }
+
+  const query = from ? { date: { $gte: from } } : {};
+  const entries = await Accounting.find(query)
+    .select({ credit: 1, debit: 1, manualBalance: 1, date: 1 })
+    .sort({ date: 1, _id: 1 })
+    .lean();
+
+  let balance = startingBalance;
+  const ops = [];
+
+  for (const e of entries) {
+    // Preserve "manualBalance override" semantics (frontend uses it; legacy data may contain it)
+    if (e.manualBalance !== null && e.manualBalance !== undefined && !Number.isNaN(Number(e.manualBalance))) {
+      balance = Number(e.manualBalance);
+    } else {
+      balance = balance + (e.credit || 0) - (e.debit || 0);
+    }
+
+    ops.push({
+      updateOne: {
+        filter: { _id: e._id },
+        update: { $set: { balance } },
+      },
+    });
+  }
+
+  if (ops.length > 0) {
+    // Bulk update is dramatically faster than saving documents in a loop
+    await Accounting.bulkWrite(ops, { ordered: false });
+  }
+}
+
 // Get all accounting entries
 exports.getAllAccounting = async (req, res) => {
   try {
@@ -110,16 +154,8 @@ exports.createAccountingEntry = async (req, res) => {
     
     await entry.save();
     
-    // Recalculate all balances after insert
-    const entries = await Accounting.find().sort({ date: 1 });
-    let balance = 0;
-    for (const e of entries) {
-      balance = balance + (e.credit || 0) - (e.debit || 0);
-      e.balance = balance;
-      // Skip full validation when recalculating historical balances to avoid
-      // failing on legacy records that might be missing fields like expenseType
-      await e.save({ validateBeforeSave: false });
-    }
+    // Recalculate balances only from this entry's date onward (fast)
+    await recalcBalancesFromDate(entry.date);
     
     // Return updated entry with proper balance
     const updatedEntry = await Accounting.findById(entry._id);
@@ -135,6 +171,11 @@ exports.createAccountingEntry = async (req, res) => {
 // Update accounting entry
 exports.updateAccountingEntry = async (req, res) => {
   try {
+    const existing = await Accounting.findById(req.params.id).select({ date: 1 }).lean();
+    if (!existing) {
+      return res.status(404).json({ message: 'Accounting entry not found' });
+    }
+
     const entry = await Accounting.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -145,14 +186,11 @@ exports.updateAccountingEntry = async (req, res) => {
       return res.status(404).json({ message: 'Accounting entry not found' });
     }
     
-    // Recalculate all balances after update
-    const entries = await Accounting.find().sort({ date: 1 });
-    let balance = 0;
-    for (const e of entries) {
-      balance = balance + (e.credit || 0) - (e.debit || 0);
-      e.balance = balance;
-      await e.save({ validateBeforeSave: false });
-    }
+    // Recalculate from the earliest affected date (old date vs new date)
+    const newDate = entry.date;
+    const oldDate = existing.date;
+    const earliest = oldDate && newDate ? (oldDate < newDate ? oldDate : newDate) : (oldDate || newDate);
+    await recalcBalancesFromDate(earliest);
     
     // Return updated entry with proper ID format
     const updatedEntry = await Accounting.findById(req.params.id);
@@ -185,14 +223,8 @@ exports.deleteAccountingEntry = async (req, res) => {
       return res.json({ message: 'Accounting entry already removed' });
     }
     
-    // Recalculate all balances
-    const entries = await Accounting.find().sort({ date: 1 });
-    let balance = 0;
-    for (const e of entries) {
-      balance = balance + (e.credit || 0) - (e.debit || 0);
-      e.balance = balance;
-      await e.save({ validateBeforeSave: false });
-    }
+    // Recalculate only from the deleted entry date onward (fast)
+    await recalcBalancesFromDate(deletedEntry.date);
     
     res.json({ message: 'Accounting entry deleted successfully' });
   } catch (error) {
