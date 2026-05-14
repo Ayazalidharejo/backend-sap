@@ -135,7 +135,7 @@ exports.login = async (req, res) => {
     const token = jwt.sign(
       { id: agent._id, email: agent.email },
       process.env.JWT_SECRET || 'default-secret',
-      { expiresIn: '7d' }
+      { expiresIn: '30m' }
     );
     
     const agentResponse = agent.toObject();
