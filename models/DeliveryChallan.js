@@ -69,10 +69,9 @@ const deliveryChallanSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-// Pre-save middleware to set referenceNo to challanNo
+// Default referenceNo to challanNo only when the client did not supply a reference
 deliveryChallanSchema.pre('save', function(next) {
-  // Set referenceNo to challanNo if not set or if challanNo changes
-  if (this.challanNo && (!this.referenceNo || this.isModified('challanNo'))) {
+  if (this.challanNo && (this.referenceNo === undefined || this.referenceNo === null || String(this.referenceNo).trim() === '')) {
     this.referenceNo = this.challanNo
   }
   next();

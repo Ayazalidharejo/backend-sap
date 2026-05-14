@@ -7,29 +7,31 @@
  */
 async function generateSequentialId(prefix, model, fieldName) {
   try {
-    // Find the last document sorted by the ID field
-    const lastDoc = await model.findOne().sort({ [fieldName]: -1 });
-    
-    if (!lastDoc || !lastDoc[fieldName]) {
-      // No documents exist, return first ID
+    // Do not use lexicographic sort (e.g. DC010 < DC009 as strings) — take max numeric suffix.
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const suffixRe = new RegExp(`^${escapedPrefix}(\\d+)$`, 'i');
+    const docs = await model
+      .find({ [fieldName]: new RegExp(`^${escapedPrefix}\\d+$`, 'i') })
+      .select(fieldName)
+      .lean();
+
+    let maxNumber = 0;
+    for (const doc of docs) {
+      const val = doc[fieldName];
+      if (val == null) continue;
+      const m = String(val).match(suffixRe);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (!Number.isNaN(n) && n > maxNumber) maxNumber = n;
+      }
+    }
+
+    if (maxNumber === 0) {
       return `${prefix}001`;
     }
-    
-    // Extract the number part (e.g., "001" from "CUST001")
-    const lastValue = lastDoc[fieldName];
-    const match = lastValue.match(new RegExp(`${prefix}(\\d+)`, 'i'));
-    
-    if (!match) {
-      // Invalid format, start from 001
-      return `${prefix}001`;
-    }
-    
-    const lastNumber = parseInt(match[1], 10);
-    const nextNumber = lastNumber + 1;
-    
-    // Pad with zeros (e.g., 1 -> "001", 25 -> "025")
+
+    const nextNumber = maxNumber + 1;
     const paddedNumber = nextNumber.toString().padStart(3, '0');
-    
     return `${prefix}${paddedNumber}`;
   } catch (error) {
     console.error('Error generating sequential ID:', error);
